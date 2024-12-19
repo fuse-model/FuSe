@@ -11,6 +11,30 @@
 This repo contains code to **Fu**se heterogeneous **Se**nsory (FuSE) data, like touch sensing or audio, into generalist robot policies via language grounding. We release both a dataset of 26,866 robot trajectories collected heterogeneous sensory modalities and checkpoints for our two main models: Octo a large diffusion-based transformer model and a 3B VLA based on PaliGemma.
 Our code is built on top of the [Octo](https://github.com/octo-models/octo) and [PaliVLA](https://github.com/kylestach/bigvision-palivla) codebases.
 
-![FuSE model](media/teaser.png)
+![FuSE model](media/teaser.jpg)
 
 ## Get Started
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Citation
+
+```bibtex
+@article{jones24fuse,
+  title={Beyond Sight: Finetuning Generalist Robot Policies with Heterogeneous Sensors via Language Grounding},
+  author={Joshua Jones and Oier Mees and Carmelo Sferrazza and Kyle Stachowicz and Pieter Abbeel and Sergey Levine},
+  journal={arXiv preprint arXiv:foo}
+  year={2024}
+}
+```
