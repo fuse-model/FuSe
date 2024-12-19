@@ -25,7 +25,8 @@ To install PaliVLA see the [PaliVLA README](palivla_digit/README.md). To install
 
 
 
-
+# License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. PaliVLA is licensed under the Apache 2.0 License - see the [LICENSE](palivla_digit/LICENSE) file for details. 
 
 
 ## Citation
