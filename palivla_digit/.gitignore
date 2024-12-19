@@ -1,0 +1,11 @@
+__pycache__
+.venv
+notebooks
+**/*.mp4
+*.ipynb
+wandb/
+*.egg-info
+
+/trained_tokenizers
+/models
+/checkpoints
