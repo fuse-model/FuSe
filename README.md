@@ -16,14 +16,27 @@ Our code is built on top of the [Octo](https://github.com/octo-models/octo) and 
 ## Get Started
 To install PaliVLA see the [PaliVLA README](palivla_digit/README.md). To install Octo see the [Octo README](octo_digit/README.md).
 
+# Dataset Download
 
+# Model Training
+For Octo:
+```bash
+python octo_digit/inference.py --bla
+```
+For PaliVLA:
+```bash
+python palivla_digit/inference.py --bla
+```
 
-
-
-
-
-
-
+# Inference with Pretrained Models
+For Octo:
+```bash
+python octo_digit/inference.py --bla
+```
+For PaliVLA:
+```bash
+python palivla_digit/inference.py --bla
+```
 
 # License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. PaliVLA is licensed under the Apache 2.0 License - see the [LICENSE](palivla_digit/LICENSE) file for details. 
