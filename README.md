@@ -14,7 +14,7 @@ Our code is built on top of the [Octo](https://github.com/octo-models/octo) and 
 ![FuSE model](media/teaser.jpg)
 
 ## Get Started
-To install PaliVLA see the [PaliVLA README](palivla/README.md). To install Octo see the [Octo README](octo_digit/README.md).
+To install PaliVLA see the [PaliVLA README](palivla_digit/README.md). To install Octo see the [Octo README](octo_digit/README.md).
 
 
 
