@@ -1,0 +1,756 @@
+from collections import defaultdict
+from contextlib import contextmanager
+from fnmatch import fnmatch
+import logging
+import time
+from typing import Callable, List, Optional, Iterable, Sequence
+
+import flax
+from flax import struct
+import jax
+from jax.experimental import multihost_utils
+import jax.numpy as jnp
+from ml_collections import ConfigDict
+import numpy as np
+from octo.data.utils.data_utils import AnnotationSelectionManager
+import optax
+import tensorflow as tf
+
+from octo.data.utils.text_processing import TextProcessor
+from octo.model.octo_model import OctoModel
+from octo.utils import jax_utils
+from octo.utils.typing import Config, Data, Params, PRNGKey
+from functools import reduce
+from operator import mul
+from itertools import chain
+from collections import defaultdict
+import re
+
+
+@struct.dataclass
+class TrainState:
+    rng: PRNGKey
+    model: OctoModel
+    step: int
+    opt_state: optax.OptState
+    tx: optax.GradientTransformation = struct.field(pytree_node=False)
+
+    @classmethod
+    def create(
+        cls,
+        rng: PRNGKey,
+        model: OctoModel,
+        tx: optax.GradientTransformation,
+    ):
+        opt_state = tx.init(model.params)
+        return cls(
+            rng=rng,
+            model=model,
+            step=0,
+            opt_state=opt_state,
+            tx=tx,
+        )
+
+    def apply_gradients(self, *, grads, rng):
+        updates, new_opt_state = self.tx.update(
+            grads, self.opt_state, self.model.params
+        )
+        new_params = optax.apply_updates(self.model.params, updates)
+
+        return self.replace(
+            step=self.step + 1,
+            model=self.model.replace(params=new_params),
+            opt_state=new_opt_state,
+            rng=rng,
+        )
+
+
+def format_name_with_config(name, config):
+    """Formats a name string with a config dict.
+
+    Formatting keys may be specified as {key} or {full_path_to_key_with_underscores}.
+
+    Example:
+        name = "model_{model_type}_{model_size}"
+        config = {"model_type": "transformer", "model_size": "small"}
+        format_name_with_config(name, config) -> "model_transformer_small"
+    """
+    config_flat = flax.traverse_util.flatten_dict(config, sep="_")
+    config_final = {k.split("_")[-1]: v for k, v in config_flat.items()}
+    format_dict = {**config_final, **config_flat}
+    return name.format(**format_dict)
+
+
+class Timer:
+    """
+    Timer utility. Usage:
+
+        timer = Timer()
+        with timer("foo"):
+            do_something()
+
+        timer.tick("bar")
+        do_something_else()
+        timer.tock("bar")
+
+        timer.get_average_times() -> {"foo": 0.1, "bar": 0.2}
+    """
+
+    def __init__(self):
+        self.reset()
+
+    @contextmanager
+    def __call__(self, key):
+        self.tick(key)
+        try:
+            yield None
+        finally:
+            self.tock(key)
+
+    def reset(self):
+        self.counts = defaultdict(int)
+        self.times = defaultdict(float)
+        self.start_times = {}
+
+    def tick(self, key):
+        if key in self.start_times:
+            raise ValueError(f"Timer is already ticking for key: {key}")
+        self.start_times[key] = time.time()
+
+    def tock(self, key):
+        if key not in self.start_times:
+            raise ValueError(f"Timer is not ticking for key: {key}")
+        self.counts[key] += 1
+        self.times[key] += time.time() - self.start_times[key]
+        del self.start_times[key]
+
+    def get_average_times(self, reset=True):
+        ret = {key: self.times[key] / self.counts[key] for key in self.counts}
+        if reset:
+            self.reset()
+        return ret
+
+
+def batched_apply(fn, batch_size):
+    """Turns a function that applies to a fixed batch size into one that applies to a variable batch size.
+    Useful for passing variable batch sizes to jit-compiled functions.
+    """
+
+    def pad_to_size(arr, size):
+        return np.pad(arr, ((0, size - len(arr)), *[(0, 0)] * (arr.ndim - 1)))
+
+    def get_batch_size(tree):
+        return next(iter(jax.tree_util.tree_leaves(tree))).shape[0]
+
+    def wrapped_fn(*args, **kwargs):
+        input_batch_size = get_batch_size((args, kwargs))
+        multihost_utils.assert_equal(
+            input_batch_size // batch_size,
+            "batched_apply has been called with arguments that would lead to"
+            " a different number of iterations on different hosts."
+            f" got batch_size={batch_size}, input_batch_size={input_batch_size}"
+            f" on host {jax.process_index()}.",
+        )
+        outputs = []
+        for i in range(0, input_batch_size, batch_size):
+            step_batch_size = min(batch_size, input_batch_size - i)
+            step_args, step_kwargs = jax.tree_map(
+                lambda arr: pad_to_size(arr[i : i + batch_size], batch_size),
+                (args, kwargs),
+            )
+            step_args, step_kwargs = jax_utils.merge_along_axis(
+                (step_args, step_kwargs)
+            )
+            step_output = fn(*step_args, **step_kwargs)
+            step_output = jax.device_get(jax_utils.split_along_axis(step_output))
+            outputs.append(
+                jax.tree_map(
+                    lambda arr: arr[:step_batch_size],
+                    step_output,
+                )
+            )
+        return jax.tree_map(lambda *args: np.concatenate(args, axis=0), *outputs)
+
+    return wrapped_fn
+
+
+def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None):
+    if sample_weights is None:
+        sample_weights = [1.0] * len(dataset_kwargs_list)
+    if eval_datasets is None:
+        return dataset_kwargs_list, sample_weights
+    if len(eval_datasets) == 0:
+        return [], []
+    else:
+        return list(
+            map(
+                list,
+                zip(
+                    *[
+                        (dkwargs, weight)
+                        for dkwargs, weight in zip(dataset_kwargs_list, sample_weights)
+                        if (dkwargs["name"] in eval_datasets)
+                    ]
+                ),
+            )
+        )
+
+
+def create_lr_schedule(name: str, **kwargs):
+    """Creates a learning rate callable.
+
+    Currently supported schedules:
+        cosine: cosine decay with warmup.
+            kwargs: init_value, peak_value, warmup_steps, decay_steps
+        rsqrt: inverse square root decay with warmup, from the "Scaling Vision Transformers" paper.
+            kwargs: init_value, peak_value, warmup_steps, timescale (optional, default 10000)
+        constant: constant learning rate with warmup.
+            kwargs: init_value, peak_value, warmup_steps
+
+    Args:
+        name: name of the schedule
+        **kwargs: additional kwargs, which vary by schedule
+    """
+    if name == "cosine":
+        return optax.warmup_cosine_decay_schedule(**kwargs)
+    elif name == "rsqrt":
+        timescale = kwargs.get("timescale", 10000)
+        return optax.join_schedules(
+            [
+                optax.linear_schedule(
+                    init_value=kwargs["init_value"],
+                    end_value=kwargs["peak_value"],
+                    transition_steps=kwargs["warmup_steps"],
+                ),
+                lambda step: kwargs["peak_value"]
+                / jnp.sqrt((step + timescale) / timescale),
+            ],
+            [kwargs["warmup_steps"]],
+        )
+    elif name == "constant":
+        return optax.join_schedules(
+            [
+                optax.linear_schedule(
+                    init_value=kwargs["init_value"],
+                    end_value=kwargs["peak_value"],
+                    transition_steps=kwargs["warmup_steps"],
+                ),
+                lambda step: kwargs["peak_value"],
+            ],
+            [kwargs["warmup_steps"]],
+        )
+    else:
+        raise ValueError(f"Unsupported lr schedule: {name}")
+
+
+def freeze_weights(
+    tx: optax.GradientTransformation,
+    params_or_params_shape: Params,
+    frozen_keys: List[str],
+    return_partitions: bool = False,
+):
+    """
+    Freezes all weights in params_or_params_shape whose keys fnmatch the ones in frozen_keys.
+    Example usage:
+        tx = freeze_weights(tx, model.params, ["octo_transformer.*"])
+    """
+    logging.info(f"Freezing parameters that include the following keys: {frozen_keys}.")
+    partition_optimizers = {
+        "trainable": tx,
+        "frozen": optax.set_to_zero(),
+    }
+    # freeze anything that matches fnmatch patterns in `frozen_keys`
+    # path is a string of .-separated module names, e.g. ('octo_transformer.BlockTransformer_0...')
+    param_partitions = flax.traverse_util.path_aware_map(
+        lambda path, v: "frozen"
+        if any([fnmatch(".".join(path), key) for key in frozen_keys])
+        else "trainable",
+        params_or_params_shape,
+    )
+    tx = optax.multi_transform(partition_optimizers, param_partitions)
+
+    logging.debug("Frozen params:")
+    flax.traverse_util.path_aware_map(
+        lambda path, opt_status: logging.debug(".".join(path))
+        if opt_status == "frozen"
+        else None,
+        param_partitions,
+    )
+    total_params = sum(
+        jax.tree_util.tree_leaves(
+            jax.tree_map(lambda x: x.size, params_or_params_shape)
+        )
+    )
+    trainable_params = sum(
+        jax.tree_util.tree_leaves(
+            jax.tree_map(
+                lambda x, y: x.size if y == "trainable" else 0,
+                params_or_params_shape,
+                param_partitions,
+            )
+        )
+    )
+    logging.info(f"Num trainable params: {trainable_params:,}.")
+    logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
+    logging.info("To see a detailed list of frozen params, set logging level to DEBUG.")
+    return (tx, param_partitions) if return_partitions else tx
+
+
+def create_optimizer(
+    params_or_params_shape: Params, **kwargs: dict
+) -> optax.GradientTransformation:
+    """Creates optimizer for Octo.
+
+    kwargs are the kwargs for optax.adamw; if the "learning_rate" key is a dict, it is interpreted
+    as the kwargs for create_lr_schedule (see above), otherwise it is interpreted as a constant
+    learning rate.
+
+    If clip_gradient is specified, then gradient clipping is applied. If frozen_keys is specified,
+    then those parameters are frozen (i.e. not updated) during training.
+
+    Returns:
+        tx: an Optax optimizer
+        lr_callable: Function that takes the current step and returns the learning rate
+    """
+    if isinstance(kwargs["learning_rate"], dict):
+        lr_callable = create_lr_schedule(**kwargs["learning_rate"])
+    else:
+        lr_callable = lambda _: kwargs["learning_rate"]
+    kwargs["learning_rate"] = lr_callable
+
+    # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
+    wd_mask = jax.tree_util.tree_map_with_path(
+        lambda path, x: "kernel" in jax.tree_util.keystr(path), params_or_params_shape
+    )
+
+    clip_gradient = kwargs.pop("clip_gradient", None)
+    frozen_keys = kwargs.pop("frozen_keys", None)
+    grad_accumulation_steps = kwargs.pop("grad_accumulation_steps", None)
+
+    tx = optax.adamw(mu_dtype=jnp.bfloat16, **kwargs, mask=wd_mask)
+    if grad_accumulation_steps:
+        tx = optax.MultiSteps(tx, grad_accumulation_steps)
+    if clip_gradient is not None:
+        tx = optax.chain(
+            optax.clip_by_global_norm(clip_gradient),
+            tx,
+        )
+
+    if frozen_keys:
+        tx, param_partitions = freeze_weights(
+            tx, params_or_params_shape, frozen_keys, return_partitions=True
+        )
+        zero_frozen_params = lambda params: jax.tree_map(
+            lambda x, y: x if y == "trainable" else jnp.zeros(()),
+            params,
+            param_partitions,
+        )
+        param_norm_callable = lambda params: optax.global_norm(
+            zero_frozen_params(params)
+        )
+    else:
+        param_norm_callable = optax.global_norm
+
+    return tx, lr_callable, param_norm_callable
+
+
+def check_config_diff(new_conf: Config, old_conf: Config, silent: bool = False):
+    """Checks for differences between new config and old config dicts."""
+    new_conf_flat = flax.traverse_util.flatten_dict(
+        new_conf.to_dict() if isinstance(new_conf, ConfigDict) else new_conf
+    )
+    old_conf_flat = flax.traverse_util.flatten_dict(
+        old_conf.to_dict() if isinstance(old_conf, ConfigDict) else old_conf
+    )
+
+    # check for missing / new keys
+    if set(new_conf_flat.keys()) != set(old_conf_flat.keys()) and not silent:
+        logging.info(
+            "New config contains extra items: %s",
+            set(new_conf_flat.keys()) - set(old_conf_flat.keys()),
+        )
+        logging.info(
+            "New config doesn't contain items: %s",
+            set(old_conf_flat.keys()) - set(new_conf_flat.keys()),
+        )
+
+    # print differing key values
+    mismatched_keys = {
+        k: (new_conf_flat[k], old_conf_flat[k])
+        for k in new_conf_flat
+        if k in old_conf_flat and new_conf_flat[k] != old_conf_flat[k]
+    }
+    if mismatched_keys and not silent:
+        logging.info(
+            "New config contains keys with new values: %s",
+            flax.core.pretty_repr(mismatched_keys),
+        )
+    return mismatched_keys or (set(new_conf_flat.keys()) != set(old_conf_flat.keys()))
+
+
+def merge_params(target_params: Params, pretrained_params: Params) -> Params:
+    """Copies pre-trained params into target_params for every param that has corresponding key + shape."""
+    flat_target_params = flax.traverse_util.flatten_dict(target_params)
+    flat_pretrained_params = flax.traverse_util.flatten_dict(pretrained_params)
+    keys_to_update = [
+        k
+        for k in flat_target_params
+        if k in flat_pretrained_params
+        and flat_target_params[k].shape == flat_pretrained_params[k].shape
+    ]
+    missing_keys = [k for k in flat_target_params if k not in flat_pretrained_params]
+    shape_mismatch_keys = [
+        k
+        for k in flat_target_params
+        if k in flat_pretrained_params
+        and flat_target_params[k].shape != flat_pretrained_params[k].shape
+    ]
+
+    for key in keys_to_update:
+        logging.debug(f"Param copied from pre-trained: {'.'.join(key)}")
+    if missing_keys or shape_mismatch_keys:
+        logging.info("########## Parameters skipped during model loading: ##########")
+        for key in missing_keys:
+            logging.info(
+                f"Param missing in pre-trained model, skipping: {'.'.join(key)}"
+            )
+        for key in shape_mismatch_keys:
+            logging.info(
+                f"Param with differing shape in pre-trained model, skipping: {'.'.join(key)}"
+            )
+
+    flat_target_params = flax.core.copy(
+        flat_target_params, {k: flat_pretrained_params[k] for k in keys_to_update}
+    )
+    target_params = flax.traverse_util.unflatten_dict(flat_target_params)
+    return target_params
+
+def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
+    """Encodes the language instruction inside the tasks for a batch.
+
+    If the text processor is None, removes language entirely from the tasks.
+    Expects batch to be a nested dictionary, where
+        batch["task"]["language_instruction"] is a sequence of byte strings
+    """
+    if text_processor is None:
+        batch["task"].pop("language_instruction")
+    else:
+        batch["task"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["task"]["language_instruction"]]
+        )
+    return batch
+
+def process_lang_list(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+    # tokenize all commands
+    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
+    batched_annotations = [batch['task'][key][i] for i, key in enumerate(batched_annotation_keys)]
+    batch["task"]["language_instruction"] = text_processor.encode(
+            [s.decode('utf-8') for s in batched_annotations]
+    )
+    batch['task']['null'] = text_processor.encode(['' for s in range(batch_size)])
+    batch['task']['pad_mask_dict']['language_instruction'] = batch['task']['pad_mask_dict'][batched_annotation_keys[0]].copy()
+
+    for key in annotation_manager.dataset_keys: 
+        if key in batch['task']: 
+            if key in annotation_manager.dataset_remove_keys: 
+                batch['task'].pop(key)
+            else: 
+                batch["task"][key] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["task"][key]]
+            )
+            
+    return batch
+
+def process_batched_rephrase(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+
+    
+    new_task = {}
+    aliases, keys = annotation_manager.choose_rephrase_keys(shape=(batch_size,))
+    batched_annotations = [batch['task'][key][i] for i, key in enumerate(keys)]
+    pad_mask_dict = {'language_instruction': jnp.array([batch['task']['pad_mask_dict'][key][i] for i, key in enumerate(keys)])}
+    new_task = {
+        'language_instruction': text_processor.encode(
+            [s.decode('utf-8') for s in batched_annotations]
+        ), 
+        'pad_mask_dict': pad_mask_dict
+    }
+    batch['task'] = new_task
+    return batch
+
+def process_fully_batched_rephrase(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+    should_rephrase = annotation_manager.should_rephrase(shape=(batch_size,))
+    rephrase_indices = annotation_manager.choose_all_rephrase_keys(shape=(batch_size,))
+    
+    
+    all_lang = {
+        f'all_lang_{i}': ['' for _ in range(batch_size)] for i in range(len(annotation_manager.dataset_keys)) if i != 1
+    } 
+    for i in range(batch_size): 
+        for annotation_idx in range(len(annotation_manager.dataset_keys)): 
+            if annotation_idx == 1: 
+                continue 
+            all_lang[f'all_lang_{annotation_idx}'][i] = batch['task'][f'rephrased_{annotation_idx}_{rephrase_indices[i][annotation_idx]}'][i] if should_rephrase[i] else batch['task'][f'target_all_lang_{annotation_idx}'][i]
+    
+    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
+    batched_annotations = [all_lang[key][i] for i, key in enumerate(batched_annotation_keys)]
+    all_lang['language_instruction'] = batched_annotations
+    new_task = {
+        k: text_processor.encode([s.decode('utf-8') for s in v]) for k, v in all_lang.items()
+    }
+    new_task['null'] = text_processor.encode(['' for s in range(batch_size)])
+    pad = jnp.array([True for _ in range(batch_size)])
+    pad_mask_dict = {f'all_lang_{i}': pad for i in range(len(annotation_manager.dataset_keys)) if i != 1}
+    pad_mask_dict['language_instruction'] = pad
+    new_task['pad_mask_dict'] = pad_mask_dict
+    batch['task'] = new_task
+    return batch
+
+def process_fully_batched_rephrase_targets(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+    should_rephrase = annotation_manager.should_rephrase(shape=(batch_size,))
+    rephrase_indices = annotation_manager.choose_all_rephrase_keys(shape=(batch_size,))
+    all_lang = {
+        f'all_lang_{i}': ['' for _ in range(batch_size)] for i in range(len(annotation_manager.dataset_keys)) if i != 1
+    } 
+    for i in range(batch_size): 
+        for annotation_idx in range(len(annotation_manager.dataset_keys)): 
+            if annotation_idx == 1: 
+                continue 
+            all_lang[f'all_lang_{annotation_idx}'][i] = batch['task'][f'rephrased_{annotation_idx}_{rephrase_indices[i][annotation_idx]}'][i] if should_rephrase[i] else batch['task'][f'target_all_lang_{annotation_idx}'][i]
+    
+    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
+    batched_annotations = [all_lang[key][i] for i, key in enumerate(batched_annotation_keys)]
+    all_lang['language_instruction'] = batched_annotations
+    new_task = {
+        k: text_processor.encode([s.decode('utf-8') for s in v]) for k, v in all_lang.items()
+    }
+    new_task['null'] = text_processor.encode(['' for s in range(batch_size)])
+    pad = jnp.array([True for _ in range(batch_size)])
+    pad_mask_dict = {f'all_lang_{i}': pad for i in range(len(annotation_manager.dataset_keys)) if i != 1}
+    pad_mask_dict['language_instruction'] = pad
+    new_task['pad_mask_dict'] = pad_mask_dict
+    
+    
+    for key in annotation_manager.dataset_keys: 
+        target_key = f'target_{key}'
+        if target_key in batch['task']: 
+            new_task[target_key] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["task"][target_key]]
+            )
+    batch['task'] = new_task
+    return batch
+
+
+
+def process_dropout_annotations(batch: Data, text_processor: TextProcessor, batch_size: int, keys: np.ndarray, probabilities: np.ndarray): 
+    batched_annotation_keys = np.random.choice(keys, size=batch_size, p=probabilities)
+    batched_annotations = [batch['task'][key][i] for i, key in enumerate(batched_annotation_keys)]
+    batch["task"]["language_instruction"] = text_processor.encode(
+            [s.decode('utf-8') for s in batched_annotations]
+    )
+    remove_keys = [key for key in batch['task'].keys() if key.startswith('annotation_')]
+    batch['task']['pad_mask_dict']['language_instruction'] = batch['task']['pad_mask_dict'][remove_keys[0]]
+    for key in remove_keys: 
+        batch['task'].pop(key, None)
+    return batch
+
+def process_and_save_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
+    """Encodes the language instruction inside the tasks for a batch, and also keeps original text instruction
+
+    If the text processor is None, removes language entirely from the tasks.
+    Expects batch to be a nested dictionary, where
+        batch["task"]["language_instruction"] is a sequence of byte strings
+    """
+    if text_processor is None:
+        batch["task"].pop("language_instruction")
+    else:
+        batch["task"]['natural_language_instruction'] = batch["task"]["language_instruction"]
+        batch["task"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["task"]["language_instruction"]]
+        )
+    return batch
+
+
+WeightLoader = Callable[[Params], Params]
+
+
+def hf_weights_loader(params, hf_model):
+    """Loads weights from a HuggingFace model into params."""
+    from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
+
+    if "t5" in hf_model:
+        config = AutoConfig.from_pretrained(hf_model)
+        model = FlaxT5EncoderModel.from_pretrained(hf_model, config=config)
+    else:
+        model = FlaxAutoModel.from_pretrained(hf_model)
+
+    model_def, model_variables = model.module, model.params
+    replaced = False
+
+    def find_and_replace(params, key, replacement):
+        nonlocal replaced
+        for k in params.keys():
+            if k == key:
+                params[k] = replacement
+                print(f"Replaced {key} in params")
+                replaced = True
+                return
+            if isinstance(params[k], type(params)):
+                find_and_replace(params[k], key, replacement)
+
+    find_and_replace(params, "hf_model", model_variables)
+    assert replaced, "Failed to load weights"
+    return params
+
+
+def siglip_weights_loader(
+    params, siglip_path="gs://big_vision/siglip/webli_en_b16_256_60500360.npz"
+):
+    # load siglip params, and parse keys from np array
+    with tf.io.gfile.GFile(siglip_path, "rb") as f:
+        siglip_params = np.load(f)
+
+    flat_params = flax.traverse_util.flatten_dict(params)
+    relevant_params = {
+        k: jnp.array(v)
+        for k, v in siglip_params.items()
+        if k.startswith("params/img/Transformer/encoderblock")
+    }
+    translated_params = {
+        k.replace(
+            "params/img/Transformer/",
+            "octo_transformer/BlockTransformer_0/Transformer_0/",
+        ): v
+        for k, v in relevant_params.items()
+    }
+    translated_params = {tuple(k.split("/")): v for k, v in translated_params.items()}
+    assert set(translated_params) - set(flat_params) == set()
+    assert all(
+        [translated_params[k].shape == flat_params[k].shape for k in translated_params]
+    )
+    flat_params.update(translated_params)
+    updated_params = flax.traverse_util.unflatten_dict(flat_params)
+
+    logging.info("Loaded siglip encoder blocks")
+    return updated_params
+
+def resnet_26_loader(
+    params, 
+    restore_path="gs://vit_models/augreg/R26_S_32-i21k-300ep-lr_0.001-aug_light1-wd_0.1-do_0.0-sd_0.0.npz", 
+    exclude_tokenizers=()
+):
+    # load pre-trained resnet from: github.com/google-research/vision_transformer/
+    with tf.io.gfile.GFile(restore_path, "rb") as f:
+        resnet_params = np.load(f)
+
+    resnet_params = {
+        tuple(k.split('/')): jnp.array(v)
+        for k, v in resnet_params.items()
+        if k.startswith('block') or k.startswith('conv_root') or k.startswith('gn_root')
+    }
+
+    marked_keys = set()
+    flat_params = flax.traverse_util.flatten_dict(params)
+    for k in flat_params:
+        if len(k) < 3 or k[2] not in ('ResNet26FILM_0', 'ResNet26_0') or 'Film' in k[3]:
+            continue
+        for exclude_key in exclude_tokenizers: 
+            if re.fullmatch(exclude_key, k[1]): 
+                print('Skipping   ', k)
+                break
+        else: 
+            print('Using    ', k)
+            new_key = resnet_params[k[3:]]
+            if 'gn' in k[-2]:
+                new_key = new_key.squeeze()
+            elif k[3] == 'conv_root':
+                assert flat_params[k].shape[2] % new_key.shape[2] == 0, (flat_params[k].shape, new_key.shape)
+                conv_tile = int(flat_params[k].shape[2] // new_key.shape[2])
+                if conv_tile:
+                    new_key = jnp.tile(new_key, (1, 1, conv_tile, 1))
+
+            assert new_key.shape == flat_params[k].shape
+            assert new_key.dtype == flat_params[k].dtype
+            flat_params[k] = new_key
+            marked_keys.add(k[3:])
+
+    logging.info("Restored ResNet26 encoder blocks")
+
+    missing_keys = set(resnet_params.keys()) - marked_keys
+    assert missing_keys == set(), f"Missing keys: {missing_keys}"
+
+    updated_params = flax.traverse_util.unflatten_dict(flat_params)
+    return updated_params
+
+def timm_vit_loader(
+    params, 
+    restore_path,
+    vit_variant,
+    verbose=False,
+    
+): 
+    with tf.io.gfile.GFile(restore_path, 'rb') as f:
+        ckpt_dict = np.load(f, allow_pickle=False)
+    keys, values = zip(*list(ckpt_dict.items()))
+    timm_flat_params = {tuple(k.split('|')): v for k, v in zip(keys, values)}
+    flat_params = flax.traverse_util.flatten_dict(params)
+    for k in flat_params: 
+        if len(k) < 4 or not k[2].startswith(vit_variant): 
+            continue
+        timm_translated_key = k[3:]
+        
+        old_param = flat_params[k]
+        timm_param = timm_flat_params[timm_translated_key]
+        
+        assert old_param.dtype == timm_param.dtype
+        if old_param.shape != timm_param.shape: 
+            logging.warning(f'Received parameter of shape {timm_param.shape} when trying to load param for {k}, expected {old_param.shape}. Skipping.')
+            continue
+        flat_params[k] = timm_param
+        if verbose: 
+            logging.info(f'Replaced parameter with key {k}...')
+    
+    updated_params = flax.traverse_util.unflatten_dict(flat_params)
+    return updated_params
+
+from functools import partial
+
+def tvl_loader_local(params, verbose=False):
+    return timm_vit_loader(params, restore_path='/home/joshwajones/ported_weights_tvl_tvl_vitbgs_params_jax.npz', vit_variant='tvlViT', verbose=verbose) 
+
+def tvl_loader(params, restore_path='gs://619c8f721786ba/ported_weights/tvl/tvl_vitbgs_params_jax.npz', verbose=False):
+    return timm_vit_loader(params, restore_path=restore_path, vit_variant='tvlViT', verbose=verbose) 
+
+def t3_loader(params, restore_path, verbose=False):
+    return timm_vit_loader(params, vit_variant='t3ViT', restore_path=restore_path, verbose=verbose)
+
+def t3medium_loader(params, verbose=False):
+    return t3_loader(params, restore_path='gs://619c8f721786ba/ported_weights/t3/t3_jax_mini_medium.npz', verbose=verbose)
+
+def mae_weights_loader(
+    params, 
+    restore_path,
+    verbose=False,
+): 
+    with tf.io.gfile.GFile(restore_path, 'rb') as f:
+        ckpt_dict = np.load(f, allow_pickle=False)
+    keys, values = zip(*list(ckpt_dict.items()))
+    mae_flat_params = {tuple(k.split('|')): v for k, v in zip(keys, values)}
+    flat_params = flax.traverse_util.flatten_dict(params)
+    for k in flat_params: 
+        if len(k) < 4 or not k[2].startswith('JaxMAE'): 
+            continue
+        mae_translated_key = k[3:]
+        
+        old_param = flat_params[k]
+        mae_param = mae_flat_params[mae_translated_key]
+        
+        assert old_param.dtype == mae_param.dtype
+        if old_param.shape != mae_param.shape: 
+            logging.warning(f'Received parameter of shape {mae_param.shape} when trying to load param for {k}, expected {old_param.shape}. Skipping.')
+            continue
+        flat_params[k] = mae_param
+        if verbose: 
+            logging.info(f'Replaced parameter with key {k}...')
+    
+    updated_params = flax.traverse_util.unflatten_dict(flat_params)
+    return updated_params
