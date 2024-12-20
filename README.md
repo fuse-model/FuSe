@@ -21,11 +21,11 @@ To install PaliVLA see the [PaliVLA README](palivla_digit/README.md). To install
 # Model Training
 For Octo:
 ```bash
-python octo_digit/inference.py --bla
+python octo_digit/scripts/finetune_fuse_pods.py --config=scripts/configs/foo.py
 ```
 For PaliVLA:
 ```bash
-python palivla_digit/inference.py --bla
+python palivla_digit/palivla/train_fuse.py --config=palivla/configs/fuse_config.py
 ```
 
 # Inference with Pretrained Models
