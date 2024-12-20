@@ -1,6 +1,6 @@
 # Beyond Sight: Finetuning Generalist Robot Policies with Heterogeneous Sensors via Language Grounding
-<!--[![arXiv](https://img.shields.io/badge/arXiv-2408.11812-df2a2a.svg)](https://arxiv.org/pdf/2408.11812)
-[![HF Models](https://img.shields.io/badge/%F0%9F%A4%97-Models-yellow)](https://huggingface.co/rail-berkeley/crossformer) -->
+<!--[![arXiv](https://img.shields.io/badge/arXiv-2408.11812-df2a2a.svg)](https://arxiv.org/pdf/2408.11812) -->
+[![HF Models](https://img.shields.io/badge/%F0%9F%A4%97-Models-yellow)](https://huggingface.co/oier-mees/FuSe) 
 [![HF Dataset](https://img.shields.io/badge/%F0%9F%A4%97-Dataset-yellow)](https://huggingface.co/datasets/oier-mees/FuSe)
 [![Python](https://img.shields.io/badge/python-3.10-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -32,6 +32,7 @@ python palivla_digit/palivla/train_fuse.py --config=palivla/configs/fuse_config.
 ```
 
 # Inference with Pretrained Models
+Download the pretrained models from the [HuggingFace model hub](https://huggingface.co/oier-mees/FuSe).
 For Octo:
 ```bash
 python octo_digit/eval/fuse_eval.py --checkpoint_weights_path=ckpt.pth
