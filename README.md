@@ -1,7 +1,7 @@
 # Beyond Sight: Finetuning Generalist Robot Policies with Heterogeneous Sensors via Language Grounding
 <!--[![arXiv](https://img.shields.io/badge/arXiv-2408.11812-df2a2a.svg)](https://arxiv.org/pdf/2408.11812)
 [![HF Models](https://img.shields.io/badge/%F0%9F%A4%97-Models-yellow)](https://huggingface.co/rail-berkeley/crossformer) -->
-[![HF Dataset](https://img.shields.io/badge/%F0%9F%A4%97-Dataset-yellow)](https://huggingface.co/datasets/oier-mees/FuSE)
+[![HF Dataset](https://img.shields.io/badge/%F0%9F%A4%97-Dataset-yellow)](https://huggingface.co/datasets/oier-mees/FuSe)
 [![Python](https://img.shields.io/badge/python-3.10-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://fuse-model.github.io/)
@@ -19,7 +19,7 @@ To install PaliVLA see the [PaliVLA README](palivla_digit/README.md). To install
 
 # Dataset Download
 We provide a dataset containing 26,866 trajectories collected on a WidowX robot at the RAIL lab @ UC Berkeley, USA. It contains visual, tactile, sound and action data collected across several environments, annotated with natural language.
-You can download the dataset from the following [HuggingFace dataset](https://huggingface.co/datasets/oier-mees/FuSE).
+You can download the dataset from the following [HuggingFace dataset](https://huggingface.co/datasets/oier-mees/FuSe).
 
 # Model Training
 For Octo:
