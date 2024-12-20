@@ -33,6 +33,7 @@ python palivla_digit/palivla/train_fuse.py --config=palivla/configs/fuse_config.
 
 # Inference with Pretrained Models
 Download the pretrained models from the [HuggingFace model hub](https://huggingface.co/oier-mees/FuSe).
+
 For Octo:
 ```bash
 python octo_digit/eval/fuse_eval.py --checkpoint_weights_path=ckpt.pth
