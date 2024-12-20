@@ -34,7 +34,7 @@ python palivla_digit/palivla/train_fuse.py --config=palivla/configs/fuse_config.
 # Inference with Pretrained Models
 For Octo:
 ```bash
-python octo_digit/inference.py --bla
+python octo_digit/eval/fuse_eval.py --checkpoint_weights_path=ckpt.pth
 ```
 For PaliVLA:
 ```bash
