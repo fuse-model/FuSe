@@ -19,10 +19,9 @@ import imageio
 import jax
 import jax.numpy as jnp
 import numpy as np
-from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
-
 from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper
+from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
 np.set_printoptions(suppress=True)
 

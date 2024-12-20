@@ -1,36 +1,36 @@
 import datetime
 from functools import partial
+import importlib
 import os
 
-import jax.numpy as jnp
 from absl import app, flags, logging
 import flax
 from flax.traverse_util import flatten_dict, unflatten_dict
 import jax
+import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
-import importlib
-from octo.data.utils.text_processing import MuseEmbedding
-from octo.model.components.tokenizers import BinTokenizer, LowdimObsTokenizer, ImageTokenizer, UnsqueezingImageTokenizer, ProjectionTokenizer, SiglipTokenizer
-import optax
-import tensorflow as tf
-import tqdm
-import wandb
-from octo.model.components.vit_encoders import ResNet26, SmallStem32
-from octo.model.resnet_model import ResnetModel
-
-
-from octo.model.components.vit_encoders import SmallStem16
 from octo.data.dataset import make_single_dataset
+from octo.data.utils.text_processing import MuseEmbedding
+from octo.model.components.tokenizers import (
+    BinTokenizer,
+    ImageTokenizer,
+    LowdimObsTokenizer,
+    ProjectionTokenizer,
+    SiglipTokenizer,
+    UnsqueezingImageTokenizer,
+)
+from octo.model.components.vit_encoders import ResNet26, SmallStem16, SmallStem32
 from octo.model.octo_model import OctoModel
+from octo.model.resnet_model import ResnetModel
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_callbacks import (
+    GradCAMVisualizationCallback,
     RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
-    GradCAMVisualizationCallback,
 )
 from octo.utils.train_utils import (
     check_config_diff,
@@ -41,6 +41,10 @@ from octo.utils.train_utils import (
     Timer,
     TrainState,
 )
+import optax
+import tensorflow as tf
+import tqdm
+import wandb
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -74,32 +78,36 @@ config_flags.DEFINE_config_file(
 
 MAX_KEY_LEN = 15
 INDENT_SIZE = MAX_KEY_LEN + 4
-INDENT = ''.join([' ' for _ in range(INDENT_SIZE)])
-def recursive_dict_print(dictionary, prefix=""): 
-    for key, val in dictionary.items(): 
+INDENT = "".join([" " for _ in range(INDENT_SIZE)])
+
+
+def recursive_dict_print(dictionary, prefix=""):
+    for key, val in dictionary.items():
         key = key[:MAX_KEY_LEN]
-        if isinstance(val, dict): 
-            print(f'{prefix}{key}')
+        if isinstance(val, dict):
+            print(f"{prefix}{key}")
             new_prefix = prefix + INDENT
             recursive_dict_print(val, new_prefix)
-        else: 
-            indent = ''.join([' ' for _ in range(INDENT_SIZE - len(key))])
-            print(f'{prefix}{key}:{indent}{val.shape}')
+        else:
+            indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
+            print(f"{prefix}{key}:{indent}{val.shape}")
 
 
 def main(_):
     initialize_compilation_cache()
     devices = jax.devices()
-    if FLAGS.o_batch_size > 0: 
+    if FLAGS.o_batch_size > 0:
         FLAGS.config.batch_size = FLAGS.o_batch_size
-    if FLAGS.o_window_size > 0: 
+    if FLAGS.o_window_size > 0:
         FLAGS.config.window_size = FLAGS.o_window_size
-    if FLAGS.o_img_emb > 0: 
-        FLAGS.config.model['image_embedding_size'] = FLAGS.o_img_emb
-    if FLAGS.o_num_layers > 0 or FLAGS.o_hidden_layer_width > 0: 
+    if FLAGS.o_img_emb > 0:
+        FLAGS.config.model["image_embedding_size"] = FLAGS.o_img_emb
+    if FLAGS.o_num_layers > 0 or FLAGS.o_hidden_layer_width > 0:
         assert FLAGS.o_num_layers > 0 and FLAGS.o_hidden_layer_width
-        FLAGS.config.model['mlp_widths'] = tuple([FLAGS.o_hidden_layer_width for _ in range(FLAGS.o_num_layers)])
- 
+        FLAGS.config.model["mlp_widths"] = tuple(
+            [FLAGS.o_hidden_layer_width for _ in range(FLAGS.o_num_layers)]
+        )
+
     logging.info(
         f"""
         Resnet Finetuning Script
@@ -161,7 +169,6 @@ def main(_):
         **FLAGS.config.wandb,
     )
 
-            
     #########
     #
     # Setup Data Loader
@@ -192,29 +199,21 @@ def main(_):
     train_data_iter = map(process_batch, train_data_iter)
     example_batch = next(train_data_iter)
 
-
-    # print example batch 
+    # print example batch
     print("############################################")
-    print('Example batch:')
-    print('\n')
+    print("Example batch:")
+    print("\n")
     recursive_dict_print(example_batch)
-    print('\n')
+    print("\n")
     print("############################################")
 
-
-
-
-    
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    
-    config = FLAGS.config.to_dict() 
-    model = ResnetModel.from_config(
-        config, 
-        example_batch=example_batch, 
-        text_processor=text_processor
-    )
 
+    config = FLAGS.config.to_dict()
+    model = ResnetModel.from_config(
+        config, example_batch=example_batch, text_processor=text_processor
+    )
 
     #########
     #
@@ -222,8 +221,7 @@ def main(_):
     #
     #########
 
-
-    # make sure keys frozen here 
+    # make sure keys frozen here
     params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
         FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
@@ -237,8 +235,8 @@ def main(_):
         tx=tx,
         rng=rng,
     )
-    
-    print(train_state.model.config['model'])
+
+    print(train_state.model.config["model"])
     #########
     #
     # Save all metadata
@@ -288,16 +286,9 @@ def main(_):
 
     def loss_fn(params, batch, rng, train=True):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
-        pred_action = bound_module(
-            batch['observation'],
-            batch['task']
-        )
-        action_loss = jnp.mean(jnp.square(batch['action'] - pred_action))
-        action_metrics = { 
-            "loss": action_loss, 
-            "mse": action_loss
-        }
-
+        pred_action = bound_module(batch["observation"], batch["task"])
+        action_loss = jnp.mean(jnp.square(batch["action"] - pred_action))
+        action_metrics = {"loss": action_loss, "mse": action_loss}
 
         return action_loss, action_metrics
 
@@ -353,7 +344,6 @@ def main(_):
         **FLAGS.config.val_kwargs,
     )
 
-
     # viz_callback = VisualizationCallback(
     #     text_processor=text_processor,
     #     val_dataset_kwargs_list=dataset_kwargs_list,
@@ -364,8 +354,8 @@ def main(_):
 
     # gradcam_callback = GradCAMVisualizationCallback(
     #     text_processor=text_processor,
-    #     val_dataset_kwargs_list=dataset_kwargs_list, 
-    #     dataset_kwargs=FLAGS.config, 
+    #     val_dataset_kwargs_list=dataset_kwargs_list,
+    #     dataset_kwargs=FLAGS.config,
     #     **FLAGS.config.gradcam_kwargs
     # )
     #########
@@ -395,7 +385,7 @@ def main(_):
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
-    if FLAGS.o_steps > 0: 
+    if FLAGS.o_steps > 0:
         FLAGS.config.num_steps = FLAGS.o_steps
 
     timer = Timer()
@@ -432,7 +422,7 @@ def main(_):
             #     wandb_log(viz_metrics, step=i)
 
             # with timer('gradcam'):
-            #     gradcam_metrics = gradcam_callback(train_state, i + 1) 
+            #     gradcam_metrics = gradcam_callback(train_state, i + 1)
             #     wandb_log(gradcam_metrics, step=i)
 
         #     if rollout_callback is not None:

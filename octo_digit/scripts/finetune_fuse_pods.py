@@ -1,55 +1,60 @@
 import datetime
 from functools import partial
+import importlib
 import os
-
-from jax.experimental import multihost_utils
 from typing import Union
-import jax.numpy as jnp
+
 from absl import app, flags, logging
 import flax
 from flax.traverse_util import flatten_dict, unflatten_dict
 import jax
+from jax.experimental import multihost_utils
+import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
-import importlib
-from octo.data.utils.data_utils import AnnotationSelectionManager
-from octo.model.components.tokenizers import BinTokenizer, LowdimObsTokenizer, ImageTokenizer, UnsqueezingImageTokenizer, ProjectionTokenizer, SiglipTokenizer
-from octo.model.octo_module import OctoModule, OctoTransformer
-from octo.utils.typing import Data
-from octo.utils import jax_utils
-import optax
-import tensorflow as tf
-import tqdm
-import wandb
-from octo.model.components.vit_encoders import ResNet26, SmallStem32
-
-from octo.model.components.vit_encoders import SmallStem16
+import numpy as np
 from octo.data.dataset import make_single_dataset
+from octo.data.utils.data_utils import AnnotationSelectionManager
+from octo.model.components.tokenizers import (
+    BinTokenizer,
+    ImageTokenizer,
+    LowdimObsTokenizer,
+    ProjectionTokenizer,
+    SiglipTokenizer,
+    UnsqueezingImageTokenizer,
+)
+from octo.model.components.vit_encoders import ResNet26, SmallStem16, SmallStem32
 from octo.model.octo_model import OctoModel
+from octo.model.octo_module import OctoModule, OctoTransformer
+from octo.utils import jax_utils
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_callbacks import (
+    GradCAMVisualizationCallback,
+    LanguageCallback,
     RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
-    LanguageCallback,
-    GradCAMVisualizationCallback,
 )
 from octo.utils.train_utils import (
     check_config_diff,
     create_optimizer,
     format_name_with_config,
     merge_params,
-    process_text,
-    process_lang_list,
     process_dropout_annotations,
     process_fully_batched_rephrase,
     process_fully_batched_rephrase_targets,
+    process_lang_list,
+    process_text,
     Timer,
     TrainState,
 )
-import numpy as np
+from octo.utils.typing import Data
+import optax
+import tensorflow as tf
+import tqdm
+import wandb
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -59,14 +64,14 @@ except ImportError:
     pass
 
 
-#TEMP
+# TEMP
 from octo.data.utils.text_processing import HFTokenizer
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("name", "experiment", "Experiment name.")
 flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
-flags.DEFINE_bool('test', False, 'Use central1a buckets')
+flags.DEFINE_bool("test", False, "Use central1a buckets")
 
 default_config_file = os.path.join(
     os.path.dirname(__file__), "configs/finetune_config.py"
@@ -80,32 +85,36 @@ config_flags.DEFINE_config_file(
 
 MAX_KEY_LEN = 15
 INDENT_SIZE = MAX_KEY_LEN + 4
-INDENT = ''.join([' ' for _ in range(INDENT_SIZE)])
-def recursive_dict_print(dictionary, prefix="", log_func=print): 
-    lines = [] 
+INDENT = "".join([" " for _ in range(INDENT_SIZE)])
+
+
+def recursive_dict_print(dictionary, prefix="", log_func=print):
+    lines = []
+
     def dfs(dictionary, prefix=""):
-        for key, val in dictionary.items(): 
+        for key, val in dictionary.items():
             key = key[:MAX_KEY_LEN]
-            if isinstance(val, dict): 
-                lines.append(f'{prefix}{key}')
+            if isinstance(val, dict):
+                lines.append(f"{prefix}{key}")
                 new_prefix = prefix + INDENT
                 dfs(val, new_prefix)
-            else: 
-                indent = ''.join([' ' for _ in range(INDENT_SIZE - len(key))])
-                lines.append(f'{prefix}{key}:{indent}{val.shape}  {val.dtype}')
+            else:
+                indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
+                lines.append(f"{prefix}{key}:{indent}{val.shape}  {val.dtype}")
+
     dfs(dictionary, prefix)
     return lines
 
 
 def main(_):
-    if FLAGS.test: 
-        FLAGS.config.dataset_kwargs['data_dir'] = "gs://619c8f721786ba"
+    if FLAGS.test:
+        FLAGS.config.dataset_kwargs["data_dir"] = "gs://619c8f721786ba"
         FLAGS.config.batch_size = 4
     initialize_compilation_cache()
     devices = jax.devices()
     assert FLAGS.config.batch_size % jax.device_count() == 0
     assert FLAGS.config.batch_size % jax.process_count() == 0
-    
+
     logging.info(
         f"""
         Octo Finetuning Script
@@ -115,7 +124,7 @@ def main(_):
         Data dir: {FLAGS.config.dataset_kwargs.data_dir}
         Task Modality: {FLAGS.config.modality}
         Finetuning Mode: {FLAGS.config.finetuning_mode}
-        
+
         # Workers: {jax.process_count()}
         # Devices: {jax.device_count()}
         Batch size: {FLAGS.config.batch_size} ({FLAGS.config.batch_size // len(devices) } per device)
@@ -132,7 +141,7 @@ def main(_):
 
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")
-    
+
     # replicated sharding -- does not shard arrays
     replicated_sharding = NamedSharding(mesh, PartitionSpec())
     # Our batches will be data-parallel sharded -- each device will get a slice of the batch
@@ -143,10 +152,9 @@ def main(_):
             batch, mesh, PartitionSpec("batch")
         )
 
-
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
-    
+
     # make sure each process loads different data
     tf.random.set_seed(FLAGS.config.seed + jax.process_index())
 
@@ -174,21 +182,18 @@ def main(_):
             **FLAGS.config.wandb,
         )
 
-
     #########
     #
     # Load Pretrained model + optionally modify config
     #
     #########
     pretrained_model_kwargs = {"checkpoint_path": FLAGS.config.pretrained_path}
-    if hasattr(FLAGS.config, "pretrained_step"): 
-        pretrained_model_kwargs["step"] = step=FLAGS.config.pretrained_step
+    if hasattr(FLAGS.config, "pretrained_step"):
+        pretrained_model_kwargs["step"] = step = FLAGS.config.pretrained_step
 
-    if 'skip_load_params' in  FLAGS.config:
-        pretrained_model_kwargs['skip_load_params'] = FLAGS.config['skip_load_params']
-    pretrained_model = OctoModel.load_pretrained(
-        **pretrained_model_kwargs
-    )
+    if "skip_load_params" in FLAGS.config:
+        pretrained_model_kwargs["skip_load_params"] = FLAGS.config["skip_load_params"]
+    pretrained_model = OctoModel.load_pretrained(**pretrained_model_kwargs)
     flat_config = flax.traverse_util.flatten_dict(
         pretrained_model.config, keep_empty_nodes=True
     )
@@ -199,25 +204,25 @@ def main(_):
             if ".".join(c_key).startswith(".".join(d_key)):
                 del flat_config[c_key]
 
-    
-    update_config = FLAGS.config.get('update_config', ConfigDict())
+    update_config = FLAGS.config.get("update_config", ConfigDict())
     flat_update_config = flatten_dict(update_config.to_dict())
     flat_config.update(flat_update_config)
 
-    for k, v in flat_config.items(): 
+    for k, v in flat_config.items():
         print(k, v)
-    pop_keys = FLAGS.config.get('pop_keys', [])
-    for key in pop_keys: 
-        if key not in flat_config: 
-            logging.warning(f'{key} not found in flat config, so can\'t pop. Skipping...')
-        else: 
+    pop_keys = FLAGS.config.get("pop_keys", [])
+    for key in pop_keys:
+        if key not in flat_config:
+            logging.warning(
+                f"{key} not found in flat config, so can't pop. Skipping..."
+            )
+        else:
             del flat_config[key]
-    
 
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
     config = config.to_dict()
-    for obs_tokenizer_key in FLAGS.config['remove_tokenizers']:
-        config['model']['observation_tokenizers'].pop(obs_tokenizer_key)
+    for obs_tokenizer_key in FLAGS.config["remove_tokenizers"]:
+        config["model"]["observation_tokenizers"].pop(obs_tokenizer_key)
     check_config_diff(config, pretrained_model.config)
 
     #########
@@ -232,11 +237,13 @@ def main(_):
         train=True,
     )
 
-    annotation_manager: AnnotationSelectionManager = dataset.supp_info['annotation_manager']
+    annotation_manager: AnnotationSelectionManager = dataset.supp_info[
+        "annotation_manager"
+    ]
 
     FLAGS.config.batch_size //= jax.process_count()
     # create text processor
-    if FLAGS.config.get('text_processor', None): 
+    if FLAGS.config.get("text_processor", None):
         text_processor = ModuleSpec.instantiate(FLAGS.config["text_processor"])()
     else:
         if config["text_processor"] is None:
@@ -244,23 +251,42 @@ def main(_):
         else:
             text_processor = ModuleSpec.instantiate(config["text_processor"])()
 
-    if FLAGS.config['dataset_kwargs']['language_key'] == 'multimodal_annotations':  
-        process_text_func = partial(process_dropout_annotations, batch_size=FLAGS.config.batch_size, keys=np.array(dataset.annotation_keys), probabilities=dataset.annotation_probabilities)
-    elif FLAGS.config['dataset_kwargs']['language_key'] in  {'all_lang_list', 'rephrase'}: 
-        process_text_func = partial(process_lang_list, batch_size=FLAGS.config.batch_size, annotation_manager=annotation_manager)
-    elif FLAGS.config['dataset_kwargs']['language_key'] == 'rephrase_batch_full': 
-        process_text_func = partial(process_fully_batched_rephrase, batch_size=FLAGS.config.batch_size, annotation_manager=annotation_manager)
-    elif FLAGS.config['dataset_kwargs']['language_key'] == 'rephrase_batch_full_target': 
-        process_text_func = partial(process_fully_batched_rephrase_targets, batch_size=FLAGS.config.batch_size, annotation_manager=annotation_manager)
-    else: 
+    if FLAGS.config["dataset_kwargs"]["language_key"] == "multimodal_annotations":
+        process_text_func = partial(
+            process_dropout_annotations,
+            batch_size=FLAGS.config.batch_size,
+            keys=np.array(dataset.annotation_keys),
+            probabilities=dataset.annotation_probabilities,
+        )
+    elif FLAGS.config["dataset_kwargs"]["language_key"] in {
+        "all_lang_list",
+        "rephrase",
+    }:
+        process_text_func = partial(
+            process_lang_list,
+            batch_size=FLAGS.config.batch_size,
+            annotation_manager=annotation_manager,
+        )
+    elif FLAGS.config["dataset_kwargs"]["language_key"] == "rephrase_batch_full":
+        process_text_func = partial(
+            process_fully_batched_rephrase,
+            batch_size=FLAGS.config.batch_size,
+            annotation_manager=annotation_manager,
+        )
+    elif FLAGS.config["dataset_kwargs"]["language_key"] == "rephrase_batch_full_target":
+        process_text_func = partial(
+            process_fully_batched_rephrase_targets,
+            batch_size=FLAGS.config.batch_size,
+            annotation_manager=annotation_manager,
+        )
+    else:
         # process_text_func = process_text
-        raise ValueError(FLAGS.config['dataset_kwargs']['language_key'] )
+        raise ValueError(FLAGS.config["dataset_kwargs"]["language_key"])
 
     def process_batch(batch):
         batch = process_text_func(batch, text_processor)
         del batch["dataset_name"]
         return batch
-
 
     train_data_iter = (
         dataset.repeat()
@@ -278,47 +304,41 @@ def main(_):
         f"Batch size per device: {example_batch['action'].shape[0] // jax.device_count()}"
     )
 
-    # print example batch 
+    # print example batch
     example_lines = []
     example_lines.append("############################################")
-    example_lines.append('Example batch:')
-    example_lines.append('\n\n')
+    example_lines.append("Example batch:")
+    example_lines.append("\n\n")
     example_lines.extend(recursive_dict_print(example_batch))
 
-    example_lines.append('\n\n')
+    example_lines.append("\n\n")
     example_lines.append("############################################")
-    logging.info('\n'.join(example_lines))
+    logging.info("\n".join(example_lines))
 
     #########
     #
     # Generation parameters
     #
     #########
-    if 'gen_modes' in FLAGS.config:
-        gen_modes = FLAGS.config['gen_modes']
+    if "gen_modes" in FLAGS.config:
+        gen_modes = FLAGS.config["gen_modes"]
     else:
-        gen_modes = [('visual',), ('tactile',), ('visual', 'tactile')]
+        gen_modes = [("visual",), ("tactile",), ("visual", "tactile")]
 
-       
-    csv_modes = [','.join(modality_tuple) for modality_tuple in gen_modes]
-    gen_mode_lang_names = [
-        annotation_manager.key_map[mode] for mode in csv_modes
-    ]
+    csv_modes = [",".join(modality_tuple) for modality_tuple in gen_modes]
+    gen_mode_lang_names = [annotation_manager.key_map[mode] for mode in csv_modes]
     modality_obs_keys = {
-        'visual': ['image_primary', 'image_wrist'], 
-        'tactile': ['image_digit_right', 'image_digit_left', 'asym_tac', 'uniform_tac'],
-        'audio': ['mic', 'mel_spectro']
-    } 
-    
+        "visual": ["image_primary", "image_wrist"],
+        "tactile": ["image_digit_right", "image_digit_left", "asym_tac", "uniform_tac"],
+        "audio": ["mic", "mel_spectro"],
+    }
+
     modality_specific_keys = []
-    for v in modality_obs_keys.values(): 
+    for v in modality_obs_keys.values():
         modality_specific_keys.extend(v)
     modality_specific_keys = set(modality_specific_keys)
-    
-    includes = ['pad_mask_dict', 'task_completed', 'timestep', 'timestep_pad_mask']
 
-
-
+    includes = ["pad_mask_dict", "task_completed", "timestep", "timestep_pad_mask"]
 
     #########
     #
@@ -329,25 +349,22 @@ def main(_):
     #     reconstruction_head_names = [
     #         f'language_{annotation_manager.key_map[key]}' for key in annotation_manager.reconstruction_loss_keys
     #     ]
-    #     for name in reconstruction_head_names: 
+    #     for name in reconstruction_head_names:
     #         config['model']['heads'][name] = FLAGS.config['lang_head']
-    if FLAGS.config['lang_head']:
-        config['model']['heads']['clip'] = FLAGS.config['lang_head']    
+    if FLAGS.config["lang_head"]:
+        config["model"]["heads"]["clip"] = FLAGS.config["lang_head"]
 
-    if FLAGS.config['gen_head']: 
-        if FLAGS.config['multi_head']:
-            generation_head_names = [f'gen_{lang_name}' for lang_name in csv_modes]
-            for name in generation_head_names: 
-                config['model']['heads'][name] = FLAGS.config['gen_head']
+    if FLAGS.config["gen_head"]:
+        if FLAGS.config["multi_head"]:
+            generation_head_names = [f"gen_{lang_name}" for lang_name in csv_modes]
+            for name in generation_head_names:
+                config["model"]["heads"][name] = FLAGS.config["gen_head"]
         else:
-            config['model']['heads']['gen'] = FLAGS.config['gen_head']
-
-
+            config["model"]["heads"]["gen"] = FLAGS.config["gen_head"]
 
     # print('\nConfig heads\n\n')
     # print(*list(config['model']['heads'].items()), sep='\n\n')
     # input('Hit enter:   ')
-
 
     #########
     #
@@ -356,8 +373,8 @@ def main(_):
     #########
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    config['max_horizon'] = 100 
-    config['model']['max_horizon'] = 100
+    config["max_horizon"] = 100
+    config["model"]["max_horizon"] = 100
     model = OctoModel.from_config(
         config,
         example_batch,
@@ -373,19 +390,15 @@ def main(_):
             loader = ModuleSpec.instantiate(loader)
         model = model.replace(params=loader(model.params))
 
-
     flattened = flatten_dict(model.params)
     for key in flattened.keys():
         print(key)
-
 
     #########
     #
     # Setup Optimizer and Train State
     #
     #########
-
-
 
     params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
@@ -452,25 +465,32 @@ def main(_):
     #
     #########
 
-    def append_identity_to_metrics(metrics: dict, identity_suffix: str) -> dict: 
+    def append_identity_to_metrics(metrics: dict, identity_suffix: str) -> dict:
         processed_metrics = {}
-        for key, val in metrics.items(): 
-            processed_metrics[f'{key}_{identity_suffix}'] = val
+        for key, val in metrics.items():
+            processed_metrics[f"{key}_{identity_suffix}"] = val
         return processed_metrics
 
-    def loss_fn_ac(bound_module: OctoModule, batch: Data, train: bool = True, specify_lang_key: str = ''):
-        logging.info('enter ac loss')
-        cache_lang = batch['task']['language_instruction']
-        if specify_lang_key: 
-            batch['task']['language_instruction'] = batch['task'][annotation_manager.key_map[specify_lang_key]]
+    def loss_fn_ac(
+        bound_module: OctoModule,
+        batch: Data,
+        train: bool = True,
+        specify_lang_key: str = "",
+    ):
+        logging.info("enter ac loss")
+        cache_lang = batch["task"]["language_instruction"]
+        if specify_lang_key:
+            batch["task"]["language_instruction"] = batch["task"][
+                annotation_manager.key_map[specify_lang_key]
+            ]
         transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["timestep_pad_mask"],
             train=train,
         )
-        if specify_lang_key: 
-            batch['task']['language_instruction'] = cache_lang
+        if specify_lang_key:
+            batch["task"]["language_instruction"] = cache_lang
         action_loss, action_metrics = bound_module.heads["action"].loss(
             transformer_embeddings,  # action head knows to pull out the "action" readout_key
             batch["action"],
@@ -478,32 +498,51 @@ def main(_):
             batch["action_pad_mask"],
             train=train,
         )
-        action_metrics = append_identity_to_metrics(action_metrics, 'ac')
-        logging.info('exit ac loss')
+        action_metrics = append_identity_to_metrics(action_metrics, "ac")
+        logging.info("exit ac loss")
         return action_loss, action_metrics
 
     # lang_loss_keys = []
-    EVAL_COMBINED = FLAGS.config.get('lang_combined', False)
-    lang_loss_keys = [annotation_manager.key_map[key] for key in annotation_manager.reconstruction_loss_keys] if annotation_manager.reconstruction_loss_keys else []
-    num_different_annotation_types =  len(lang_loss_keys) + int(EVAL_COMBINED)
-    reconstruction_weight = FLAGS.config['reconstruction_loss_weight']
-    effective_weight =  reconstruction_weight * 1.0 / num_different_annotation_types if num_different_annotation_types else 0.0
-    
-    def loss_fn_lang(bound_module: OctoModule, batch: Data, train: bool = True, eval_unseparated: bool = False, **kwargs): 
+    EVAL_COMBINED = FLAGS.config.get("lang_combined", False)
+    lang_loss_keys = (
+        [
+            annotation_manager.key_map[key]
+            for key in annotation_manager.reconstruction_loss_keys
+        ]
+        if annotation_manager.reconstruction_loss_keys
+        else []
+    )
+    num_different_annotation_types = len(lang_loss_keys) + int(EVAL_COMBINED)
+    reconstruction_weight = FLAGS.config["reconstruction_loss_weight"]
+    effective_weight = (
+        reconstruction_weight * 1.0 / num_different_annotation_types
+        if num_different_annotation_types
+        else 0.0
+    )
+
+    def loss_fn_lang(
+        bound_module: OctoModule,
+        batch: Data,
+        train: bool = True,
+        eval_unseparated: bool = False,
+        **kwargs,
+    ):
 
         total_loss = 0.0
         info = {}
-        cached_lang = batch['task'].pop('language_instruction')
+        cached_lang = batch["task"].pop("language_instruction")
         transformer_embeddings_no_lang = bound_module.octo_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["timestep_pad_mask"],
             train=train,
         )
-        
-        for lang_key in lang_loss_keys: 
-            batch['task']['language_instruction'] = batch['task'][lang_key]
-            true_language_embeddings = bound_module.octo_transformer.embed_language(batch['task'], train=train)
+
+        for lang_key in lang_loss_keys:
+            batch["task"]["language_instruction"] = batch["task"][lang_key]
+            true_language_embeddings = bound_module.octo_transformer.embed_language(
+                batch["task"], train=train
+            )
             # lang_loss, lang_metrics = bound_module.heads[f"language_{lang_key}"].loss(
             #     transformer_embeddings_no_lang,
             #     true_language_embeddings,
@@ -516,193 +555,232 @@ def main(_):
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            lang_metrics = append_identity_to_metrics(lang_metrics, identity_suffix=f'contrastive_{annotation_manager.rev_key_map[lang_key]}')      
+            lang_metrics = append_identity_to_metrics(
+                lang_metrics,
+                identity_suffix=f"contrastive_{annotation_manager.rev_key_map[lang_key]}",
+            )
             total_loss += lang_loss
             info.update(lang_metrics)
-        
-        batch['task']['language_instruction'] = cached_lang 
+
+        batch["task"]["language_instruction"] = cached_lang
         if eval_unseparated:
-            true_language_embeddings = bound_module.octo_transformer.embed_language(batch['task'], train=train)
+            true_language_embeddings = bound_module.octo_transformer.embed_language(
+                batch["task"], train=train
+            )
             lang_loss, lang_metrics = bound_module.heads[f"clip"].loss(
                 transformer_embeddings_no_lang,
                 true_language_embeddings,
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            lang_metrics = append_identity_to_metrics(lang_metrics, identity_suffix=f'contrastive_all')      
+            lang_metrics = append_identity_to_metrics(
+                lang_metrics, identity_suffix=f"contrastive_all"
+            )
             total_loss += lang_loss
             info.update(lang_metrics)
         total_loss *= effective_weight
         return total_loss, info
 
-    def create_batch(batch, obs, gen_mode): 
+    def create_batch(batch, obs, gen_mode):
         modality_obs = {}
         for modality_key in gen_mode:
             for obs_key in modality_obs_keys[modality_key]:
-                if obs_key in obs: 
+                if obs_key in obs:
                     modality_obs[obs_key] = obs[obs_key]
         for key in includes:
             modality_obs[key] = obs[key]
-        batch['observation'] = modality_obs
+        batch["observation"] = modality_obs
         return batch
-    
-    USE_TARGETS = FLAGS.config['dataset_kwargs']['language_key'] == 'rephrase_batch_full_target'
 
-    def get_language_decode_ids_single_head(params, batch, rng, use_targets: bool = USE_TARGETS, train=True): 
-        obs = batch['observation']
-        cache_lang = batch['task'].pop('language_instruction')
-        batch['task']['language_instruction'] = batch['task']['null']
+    USE_TARGETS = (
+        FLAGS.config["dataset_kwargs"]["language_key"] == "rephrase_batch_full_target"
+    )
+
+    def get_language_decode_ids_single_head(
+        params, batch, rng, use_targets: bool = USE_TARGETS, train=True
+    ):
+        obs = batch["observation"]
+        cache_lang = batch["task"].pop("language_instruction")
+        batch["task"]["language_instruction"] = batch["task"]["null"]
         info = {}
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
-        for gen_mode, csv_mode, gen_mode_lang_name in zip(gen_modes, csv_modes, gen_mode_lang_names): 
+        for gen_mode, csv_mode, gen_mode_lang_name in zip(
+            gen_modes, csv_modes, gen_mode_lang_names
+        ):
             batch = create_batch(batch, obs, gen_mode)
             modality_transformer_embedding = bound_module.octo_transformer(
-                batch['observation'],
+                batch["observation"],
                 batch["task"],
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            target_key = f'target_{gen_mode_lang_name}' if use_targets else gen_mode_lang_name
-            target_lang = batch['task'][target_key]['input_ids']
+            target_key = (
+                f"target_{gen_mode_lang_name}" if use_targets else gen_mode_lang_name
+            )
+            target_lang = batch["task"][target_key]["input_ids"]
             decode_ids = bound_module.heads[f"gen"].reconstruct_lang(
                 modality_transformer_embedding,
                 mode=csv_mode,
                 train=train,
             )
-            info[f'gen_{csv_mode}'] = [decode_ids, target_lang]
-        batch['task']['language_instruction'] = cache_lang
-        batch['observation'] = obs
-        return info 
-    
-    def get_language_decode_ids_multi_head(params, batch, rng,  train=True): 
+            info[f"gen_{csv_mode}"] = [decode_ids, target_lang]
+        batch["task"]["language_instruction"] = cache_lang
+        batch["observation"] = obs
+        return info
+
+    def get_language_decode_ids_multi_head(params, batch, rng, train=True):
         raise NotImplementedError
-        obs = batch['observation']
-        cache_lang = batch['task'].pop('language_instruction')
-        batch['task']['language_instruction'] = batch['task']['null']
+        obs = batch["observation"]
+        cache_lang = batch["task"].pop("language_instruction")
+        batch["task"]["language_instruction"] = batch["task"]["null"]
         info = {}
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
-        for gen_mode, csv_mode, gen_mode_lang_name in zip(gen_modes, csv_modes, gen_mode_lang_names): 
+        for gen_mode, csv_mode, gen_mode_lang_name in zip(
+            gen_modes, csv_modes, gen_mode_lang_names
+        ):
             batch = create_batch(batch, obs, gen_mode)
             modality_transformer_embedding = bound_module.octo_transformer(
-                batch['observation'],
+                batch["observation"],
                 batch["task"],
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            target_lang = batch['task'][gen_mode_lang_name]['input_ids']
+            target_lang = batch["task"][gen_mode_lang_name]["input_ids"]
             decode_ids = bound_module.heads[f"gen_{csv_mode}"].reconstruct_lang(
                 modality_transformer_embedding,
                 train=train,
             )
-            info[f'gen_{csv_mode}'] = [decode_ids, target_lang]
-        batch['task']['language_instruction'] = cache_lang
-        batch['observation'] = obs
-        return info 
-    
-    
-    
-    def loss_fn_lang_gen_single_head(bound_module: OctoModule, batch: Data, train: bool = True, use_targets: bool = USE_TARGETS, **kwargs): 
+            info[f"gen_{csv_mode}"] = [decode_ids, target_lang]
+        batch["task"]["language_instruction"] = cache_lang
+        batch["observation"] = obs
+        return info
+
+    def loss_fn_lang_gen_single_head(
+        bound_module: OctoModule,
+        batch: Data,
+        train: bool = True,
+        use_targets: bool = USE_TARGETS,
+        **kwargs,
+    ):
         total_loss = 0.0
-        obs = batch['observation']
-        cache_lang = batch['task'].pop('language_instruction')
-        batch['task']['language_instruction'] = batch['task']['null']
+        obs = batch["observation"]
+        cache_lang = batch["task"].pop("language_instruction")
+        batch["task"]["language_instruction"] = batch["task"]["null"]
         info = {}
-        for gen_mode, csv_mode, gen_mode_lang_name in zip(gen_modes, csv_modes, gen_mode_lang_names): 
-            if 'audio' in gen_mode:
-                mask = obs['mic_mask'][:, 0] # remove window dimension
-            elif 'tactile' in gen_mode:
-                mask = 1 - obs['mic_mask'][:, 0]
+        for gen_mode, csv_mode, gen_mode_lang_name in zip(
+            gen_modes, csv_modes, gen_mode_lang_names
+        ):
+            if "audio" in gen_mode:
+                mask = obs["mic_mask"][:, 0]  # remove window dimension
+            elif "tactile" in gen_mode:
+                mask = 1 - obs["mic_mask"][:, 0]
             else:
                 mask = None
             batch = create_batch(batch, obs, gen_mode)
             example_lines = []
             example_lines.append("############################################")
-            example_lines.append('Example batch:')
-            example_lines.append('\n\n')
+            example_lines.append("Example batch:")
+            example_lines.append("\n\n")
             example_lines.extend(recursive_dict_print(batch))
 
-            example_lines.append('\n\n')
+            example_lines.append("\n\n")
             example_lines.append("############################################")
-            logging.info('\n'.join(example_lines))
+            logging.info("\n".join(example_lines))
             modality_transformer_embedding = bound_module.octo_transformer(
-                batch['observation'],
+                batch["observation"],
                 batch["task"],
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            target_key = f'target_{gen_mode_lang_name}' if use_targets else gen_mode_lang_name
-            target_lang = batch['task'][target_key]['input_ids']
+            target_key = (
+                f"target_{gen_mode_lang_name}" if use_targets else gen_mode_lang_name
+            )
+            target_lang = batch["task"][target_key]["input_ids"]
             gen_loss, gen_metrics = bound_module.heads[f"gen"].loss(
                 modality_transformer_embedding,
                 target_lang,
-                csv_mode, 
+                csv_mode,
                 batch["observation"]["timestep_pad_mask"],
                 mask=mask,
                 train=train,
             )
-            gen_metrics = append_identity_to_metrics(gen_metrics, identity_suffix=f'gen_{csv_mode}')      
+            gen_metrics = append_identity_to_metrics(
+                gen_metrics, identity_suffix=f"gen_{csv_mode}"
+            )
             total_loss += gen_loss
             info.update(gen_metrics)
         total_loss /= len(gen_modes)
-        batch['task']['language_instruction'] = cache_lang
-        batch['observation'] = obs
+        batch["task"]["language_instruction"] = cache_lang
+        batch["observation"] = obs
         return total_loss, info
-    
-    def loss_fn_lang_gen_multi_head(bound_module: OctoModule, batch: Data, train: bool = True, **kwargs): 
+
+    def loss_fn_lang_gen_multi_head(
+        bound_module: OctoModule, batch: Data, train: bool = True, **kwargs
+    ):
         raise NotImplementedError
         total_loss = 0.0
-        obs = batch['observation']
-        cache_lang = batch['task'].pop('language_instruction')
-        batch['task']['language_instruction'] = batch['task']['null']
+        obs = batch["observation"]
+        cache_lang = batch["task"].pop("language_instruction")
+        batch["task"]["language_instruction"] = batch["task"]["null"]
         info = {}
-        for gen_mode, csv_mode, gen_mode_lang_name in zip(gen_modes, csv_modes, gen_mode_lang_names): 
+        for gen_mode, csv_mode, gen_mode_lang_name in zip(
+            gen_modes, csv_modes, gen_mode_lang_names
+        ):
             batch = create_batch(batch, obs, gen_mode)
             example_lines = []
             example_lines.append("############################################")
-            example_lines.append('Example batch:')
-            example_lines.append('\n\n')
+            example_lines.append("Example batch:")
+            example_lines.append("\n\n")
             example_lines.extend(recursive_dict_print(batch))
 
-            example_lines.append('\n\n')
+            example_lines.append("\n\n")
             example_lines.append("############################################")
-            logging.info('\n'.join(example_lines))
+            logging.info("\n".join(example_lines))
             modality_transformer_embedding = bound_module.octo_transformer(
-                batch['observation'],
+                batch["observation"],
                 batch["task"],
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            target_lang = batch['task'][gen_mode_lang_name]['input_ids']
+            target_lang = batch["task"][gen_mode_lang_name]["input_ids"]
             gen_loss, gen_metrics = bound_module.heads[f"gen_{csv_mode}"].loss(
                 modality_transformer_embedding,
                 target_lang,
                 batch["observation"]["timestep_pad_mask"],
                 train=train,
             )
-            gen_metrics = append_identity_to_metrics(gen_metrics, identity_suffix=f'gen_{csv_mode}')      
+            gen_metrics = append_identity_to_metrics(
+                gen_metrics, identity_suffix=f"gen_{csv_mode}"
+            )
             total_loss += gen_loss
             info.update(gen_metrics)
-            
-            
-            
-            
-            # pass 
+
+            # pass
             # create batch with only correct observations
             # run through transformer, along with null language
             # get correct language from batch, e.g. all_lang_2
             # do loss on head
-        batch['task']['language_instruction'] = cache_lang
-        batch['observation'] = obs
+        batch["task"]["language_instruction"] = cache_lang
+        batch["observation"] = obs
         return total_loss, info
 
-    if FLAGS.config['multi_head']:
+    if FLAGS.config["multi_head"]:
         loss_fn_lang_gen = loss_fn_lang_gen_multi_head
         get_language_decode_ids = get_language_decode_ids_multi_head
-    else: 
+    else:
         loss_fn_lang_gen = loss_fn_lang_gen_single_head
         get_language_decode_ids = get_language_decode_ids_single_head
 
-    def loss_fn(params, batch, rng, train=True, eval_ac=True, eval_lang=True, gen_lang=True, **kwargs): 
+    def loss_fn(
+        params,
+        batch,
+        rng,
+        train=True,
+        eval_ac=True,
+        eval_lang=True,
+        gen_lang=True,
+        **kwargs,
+    ):
         info = {}
         loss = 0.0
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
@@ -710,24 +788,25 @@ def main(_):
             ac_loss, ac_metrics = loss_fn_ac(bound_module, batch, train, **kwargs)
             info.update(ac_metrics)
             loss += ac_loss
-            
-        if eval_lang: 
+
+        if eval_lang:
             lang_loss, lang_metrics = loss_fn_lang(bound_module, batch, train, **kwargs)
             info.update(lang_metrics)
             loss += lang_loss
-        
+
         if gen_lang:
-            gen_loss, gen_metrics = loss_fn_lang_gen(bound_module, batch, train, **kwargs)
+            gen_loss, gen_metrics = loss_fn_lang_gen(
+                bound_module, batch, train, **kwargs
+            )
             info.update(gen_metrics)
             loss += gen_loss
-        
-        info['loss_total'] = loss
+
+        info["loss_total"] = loss
         return loss, info
 
-
     # eval_language = FLAGS.config.get('eval_lang', False)
-    eval_language = FLAGS.config['lang_head'] and lang_loss_keys
-    gen_language = FLAGS.config['gen_head'] is not None
+    eval_language = FLAGS.config["lang_head"] and lang_loss_keys
+    gen_language = FLAGS.config["gen_head"] is not None
     # Data parallelism
     # Model is replicated across devices, data is   split across devices
     @partial(
@@ -741,7 +820,12 @@ def main(_):
     def train_step(state: TrainState, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            state.model.params, batch, dropout_rng, train=True, eval_lang=eval_language, gen_lang=gen_language,
+            state.model.params,
+            batch,
+            dropout_rng,
+            train=True,
+            eval_lang=eval_language,
+            gen_lang=gen_language,
         )
         grad_norm = optax.global_norm(grads)
         updates, _ = state.tx.update(grads, state.opt_state, state.model.params)
@@ -773,18 +857,16 @@ def main(_):
         modes_to_evaluate = ["base"]
 
     dataset_kwargs_list = [FLAGS.config.dataset_kwargs]
-    
-    if FLAGS.config.get('skip_val', False):
-        val_callback = lambda a,b: {}
-    else: 
+
+    if FLAGS.config.get("skip_val", False):
+        val_callback = lambda a, b: {}
+    else:
         val_callback = ValidationCallback(
-            loss_fns={ 
-                'ac_only': partial(loss_fn, eval_ac=True, eval_lang=False), 
-                'combined': loss_fn
+            loss_fns={
+                "ac_only": partial(loss_fn, eval_ac=True, eval_lang=False),
+                "combined": loss_fn,
             },
-            lang_modes = {
-                'ac_only': annotation_manager.eval_keys
-            },
+            lang_modes={"ac_only": annotation_manager.eval_keys},
             process_batch_fn=process_batch,
             text_processor=text_processor,
             val_dataset_kwargs_list=dataset_kwargs_list,
@@ -801,23 +883,23 @@ def main(_):
         **FLAGS.config.viz_kwargs,
     )
 
-    if FLAGS.config['gen_head']: 
+    if FLAGS.config["gen_head"]:
 
         lang_callback = LanguageCallback(
-                get_ids_fn=get_language_decode_ids,
-                process_batch_fn=process_batch,
-                text_processor=text_processor,
-                val_dataset_kwargs_list=dataset_kwargs_list,
-                dataset_kwargs=FLAGS.config,
-                modes_to_evaluate=modes_to_evaluate,
-                **FLAGS.config.val_kwargs,
-            )
+            get_ids_fn=get_language_decode_ids,
+            process_batch_fn=process_batch,
+            text_processor=text_processor,
+            val_dataset_kwargs_list=dataset_kwargs_list,
+            dataset_kwargs=FLAGS.config,
+            modes_to_evaluate=modes_to_evaluate,
+            **FLAGS.config.val_kwargs,
+        )
     else:
         lang_callback = lambda a, b: {}
     # gradcam_callback = GradCAMVisualizationCallback(
     #     text_processor=text_processor,
-    #     val_dataset_kwargs_list=dataset_kwargs_list, 
-    #     dataset_kwargs=FLAGS.config, 
+    #     val_dataset_kwargs_list=dataset_kwargs_list,
+    #     dataset_kwargs=FLAGS.config,
     #     **FLAGS.config.gradcam_kwargs
     # )
     #########
@@ -857,7 +939,6 @@ def main(_):
 
         with timer("dataset"):
             batch = next(train_data_iter)
-        
 
         with timer("train"):
             train_state, update_info = train_step(train_state, batch)
@@ -882,7 +963,7 @@ def main(_):
             #     wandb_log(viz_metrics, step=i)
 
             # with timer('gradcam'):
-            #     gradcam_metrics = gradcam_callback(train_state, i + 1) 
+            #     gradcam_metrics = gradcam_callback(train_state, i + 1)
             #     wandb_log(gradcam_metrics, step=i)
 
         #     if rollout_callback is not None:

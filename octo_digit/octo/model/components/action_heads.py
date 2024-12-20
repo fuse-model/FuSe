@@ -9,7 +9,6 @@ import jax
 from jax import Array
 import jax.numpy as jnp
 from jax.typing import ArrayLike
-
 from octo.model.components.base import TokenGroup
 from octo.model.components.diffusion import cosine_beta_schedule, create_diffusion_model
 from octo.model.components.tokenizers import BinTokenizer
@@ -122,6 +121,7 @@ def discrete_loss(
         "mse": mse,
         "accuracy": accuracy,
     }
+
 
 class ContinuousActionHead(nn.Module, ActionHead):
     """Predicts continuous actions (as opposed to discretized).

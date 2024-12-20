@@ -1,25 +1,27 @@
 import dataclasses
 from functools import partial
 from typing import Callable, Literal, Optional
-from einops import rearrange
-from flax import struct
-from tensorflow_text import SentencepieceTokenizer
-import tensorflow as tf
-from ml_collections import ConfigDict
-import jax
-import numpy as np
-import jax.numpy as jnp
-from flax import linen as nn
-from flax.core.frozen_dict import FrozenDict
-from jax.experimental import jax2tf
 
+from einops import rearrange
+from flax import linen as nn
+from flax import struct
+from flax.core.frozen_dict import FrozenDict
+import jax
+from jax.experimental import jax2tf
+import jax.numpy as jnp
+from ml_collections import ConfigDict
+import numpy as np
 from palivla.utils import freeze_structure
+import tensorflow as tf
+from tensorflow_text import SentencepieceTokenizer
 
 
 class ActionTokenizer(nn.Module):
-    def tokenize(self, data, obs=None): ...
+    def tokenize(self, data, obs=None):
+        ...
 
-    def detokenize(self, tokens, obs=None): ...
+    def detokenize(self, tokens, obs=None):
+        ...
 
 
 class BinActionTokenizer(ActionTokenizer):
@@ -79,7 +81,12 @@ class Tokenizer:
         prompt_autoregressive: bool = struct.field(pytree_node=True)
 
         @classmethod
-        def create(cls, action_tokenizer: ActionTokenizer, language_tokenizer: SentencepieceTokenizer, prompt_autoregressive: bool = False):
+        def create(
+            cls,
+            action_tokenizer: ActionTokenizer,
+            language_tokenizer: SentencepieceTokenizer,
+            prompt_autoregressive: bool = False,
+        ):
             return cls(
                 action_vocab_size=action_tokenizer.vocab_size,
                 action_vocab_offset=256000,
@@ -88,7 +95,9 @@ class Tokenizer:
                 bos_token=language_tokenizer.string_to_id("<bos>").numpy().item(),
                 eos_token=language_tokenizer.string_to_id("<eos>").numpy().item(),
                 pad_token=language_tokenizer.string_to_id("<pad>").numpy().item(),
-                begin_of_action_token=language_tokenizer.string_to_id("\n").numpy().item(),
+                begin_of_action_token=language_tokenizer.string_to_id("\n")
+                .numpy()
+                .item(),
                 max_pad_length=60,
                 min_action_value=getattr(action_tokenizer, "min_action_value", None),
                 max_action_value=getattr(action_tokenizer, "max_action_value", None),
@@ -117,23 +126,29 @@ class Tokenizer:
         config: TokenizerConfig | None = None,
     ):
         if config is None:
-            config = cls.TokenizerConfig.create(action_tokenizer, language_tokenizer, prompt_autoregressive)
+            config = cls.TokenizerConfig.create(
+                action_tokenizer, language_tokenizer, prompt_autoregressive
+            )
 
         pad_token = language_tokenizer.string_to_id("<pad>").numpy().item()
 
         @tf.function(autograph=False)
         def _tokenize(params, actions, obs):
-            toks = jax2tf.convert(
-                partial(action_tokenizer.apply, method="tokenize"),
-                native_serialization=True,
-                native_serialization_platforms=["cpu"],
-            )({"params": params}, actions[None], obs=obs),
+            toks = (
+                jax2tf.convert(
+                    partial(action_tokenizer.apply, method="tokenize"),
+                    native_serialization=True,
+                    native_serialization_platforms=["cpu"],
+                )({"params": params}, actions[None], obs=obs),
+            )
             if isinstance(toks, tuple):
                 toks = toks[0]
             return tf.squeeze(toks, axis=0)
 
         return cls(
-            config=cls.TokenizerConfig.create(action_tokenizer, language_tokenizer, prompt_autoregressive),
+            config=cls.TokenizerConfig.create(
+                action_tokenizer, language_tokenizer, prompt_autoregressive
+            ),
             language_tokenizer=language_tokenizer,
             token_structure=FrozenDict(
                 freeze_structure(
@@ -155,8 +170,12 @@ class Tokenizer:
             action_tokenizer=action_tokenizer,
             action_tokenizer_params=action_tokenizer_params,
             _tf_action_tokenize_fn=_tokenize,
-            _jax_action_detokenize_fn=jax.jit(partial(action_tokenizer.apply, method="detokenize")),
-            _jax_action_tokenize_fn=jax.jit(partial(action_tokenizer.apply, method="tokenize")),
+            _jax_action_detokenize_fn=jax.jit(
+                partial(action_tokenizer.apply, method="detokenize")
+            ),
+            _jax_action_tokenize_fn=jax.jit(
+                partial(action_tokenizer.apply, method="tokenize")
+            ),
         )
 
     def compose_token_structure(self, tokens, include_keys=["prefix", "causal", "pad"]):
@@ -201,8 +220,8 @@ class Tokenizer:
             axis=0,
         )[: self.config.max_pad_length]
 
-        always_include_prefix_mask = (
-            tf.ones_like(tokens_by_name["prefix"], dtype=tf.bool)
+        always_include_prefix_mask = tf.ones_like(
+            tokens_by_name["prefix"], dtype=tf.bool
         )
         mask_ar_fuse = tf.concat(
             [
@@ -221,7 +240,6 @@ class Tokenizer:
             axis=0,
         )[: self.config.max_pad_length]
 
-
         return tokens, mask_ar, mask_loss, mask_ar_fuse, mask_loss_fuse
 
     def tokenize_language_instruction(self, data):
@@ -239,7 +257,10 @@ class Tokenizer:
         if is_single_sample:
             data = data[None]
         tokens = (
-            self._jax_action_tokenize_fn({"params": self.action_tokenizer_params}, data, obs=obs) + self.config.action_vocab_offset
+            self._jax_action_tokenize_fn(
+                {"params": self.action_tokenizer_params}, data, obs=obs
+            )
+            + self.config.action_vocab_offset
         )
         if is_single_sample:
             tokens = tokens[0]
@@ -250,7 +271,11 @@ class Tokenizer:
         if is_single_sample:
             tokens = tokens[None]
         with jax.profiler.TraceAnnotation("detokenize"):
-            recon = self._jax_action_detokenize_fn({"params": self.action_tokenizer_params}, tokens - self.config.action_vocab_offset, obs=obs)
+            recon = self._jax_action_detokenize_fn(
+                {"params": self.action_tokenizer_params},
+                tokens - self.config.action_vocab_offset,
+                obs=obs,
+            )
 
         if is_single_sample:
             recon = recon[0]
@@ -265,7 +290,13 @@ class Tokenizer:
             + self.config.action_vocab_offset,
         }
 
-        tokens, mask_ar, mask_loss, mask_ar_fuse, mask_loss_fuse = self.compose_token_structure(tokens)
+        (
+            tokens,
+            mask_ar,
+            mask_loss,
+            mask_ar_fuse,
+            mask_loss_fuse,
+        ) = self.compose_token_structure(tokens)
 
         return {
             "tokens": tokens,
@@ -279,15 +310,19 @@ class Tokenizer:
     def prepare_tokens_for_generation(self, data, language_token_instructions):
         tokens = {
             "prompt": language_token_instructions[: self.config.max_pad_length - 10],
-             "action": self._tf_action_tokenize_fn(
+            "action": self._tf_action_tokenize_fn(
                 self.action_tokenizer_params, data["action"][-1], None
             )
             + self.config.action_vocab_offset,
         }
 
-        tokens, mask_ar, mask_loss, mask_ar_fuse, mask_loss_fuse = self.compose_token_structure(
-            tokens
-        )
+        (
+            tokens,
+            mask_ar,
+            mask_loss,
+            mask_ar_fuse,
+            mask_loss_fuse,
+        ) = self.compose_token_structure(tokens)
 
         return {
             "tokens": tokens,

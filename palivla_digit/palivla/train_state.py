@@ -1,34 +1,32 @@
 from functools import cached_property, partial
 from typing import Dict, Optional, Sequence
-from flax.training.train_state import TrainState as FlaxTrainState
-from flax.struct import dataclass, field
+
 from flax import linen as nn
-from flax.core.frozen_dict import FrozenDict, unfreeze, freeze
+from flax.core.frozen_dict import freeze, FrozenDict, unfreeze
+from flax.struct import dataclass, field
+from flax.training.train_state import TrainState as FlaxTrainState
 import jax
 import jax.experimental
 import jax.experimental.multihost_utils
 import jax.numpy as jnp
-import orbax.checkpoint as ocp
-from scalax.sharding import (
-    MeshShardingHelper,
-    ShardingRule,
-    PartitionSpec,
-)
-import optax
 import numpy as np
+import optax
+import orbax.checkpoint as ocp
+from palivla.eval_step import compute_eval_stats, compute_gen_stats
+from palivla.model import load_from_pretrained
+from palivla.predict_fns import _decode
+
+# from palivla.preprocess.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
+from palivla.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
+from palivla.spec import ModuleSpec, OptimizerSpec, restore_gluon_module
+from palivla.tokenizer import Tokenizer
+from palivla.train_step import step_fn, TrainingBatch
+from palivla.types import Params, RolloutBatch
+from palivla.utils import merge_params
+from scalax.sharding import MeshShardingHelper, PartitionSpec, ShardingRule
 import tensorflow as tf
 from tensorflow_text import SentencepieceTokenizer
 
-from palivla.eval_step import compute_eval_stats, compute_gen_stats
-from palivla.model import load_from_pretrained
-from palivla.spec import ModuleSpec, OptimizerSpec, restore_gluon_module
-from palivla.tokenizer import Tokenizer
-# from palivla.preprocess.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
-from palivla.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
-from palivla.train_step import TrainingBatch, step_fn
-from palivla.types import Params, RolloutBatch
-from palivla.predict_fns import _decode
-from palivla.utils import merge_params
 
 class ShardingMetadata:
     mesh: MeshShardingHelper
@@ -221,7 +219,8 @@ class TrainState(FlaxTrainState):
             # Add the shardings
             if sharding_metadata is not None:
                 shardings = sharding_metadata.mesh.match_sharding_rule(
-                    sharding_metadata.model_sharding_rule, {"opt_state": abstract_opt_state}
+                    sharding_metadata.model_sharding_rule,
+                    {"opt_state": abstract_opt_state},
                 )["opt_state"]
                 abstract_opt_state = jax.tree_map(
                     lambda x, s: jax.ShapeDtypeStruct(x.shape, x.dtype, sharding=s),
@@ -557,7 +556,9 @@ class PaliVLATrainState:
     @cached_property
     def step_fn(self):
         # for some reason, static argnums not working, can't be bothered to figure it out
-        __step_fn = partial(step_fn, self.detokenize_action, True, self.tokenizer.config, False)
+        __step_fn = partial(
+            step_fn, self.detokenize_action, True, self.tokenizer.config, False
+        )
         if self.mesh is None:
             _step_fn = partial(jax.jit, __step_fn)
         else:
@@ -583,10 +584,12 @@ class PaliVLATrainState:
                 None,
             ),
         )
-    
+
     @cached_property
     def fuse_step_fn(self):
-        __step_fn = partial(step_fn, self.detokenize_action, True, self.tokenizer.config, True)
+        __step_fn = partial(
+            step_fn, self.detokenize_action, True, self.tokenizer.config, True
+        )
         if self.mesh is None:
             _step_fn = partial(jax.jit, __step_fn)
         else:
@@ -614,20 +617,24 @@ class PaliVLATrainState:
         )
 
     def prepare_sensors(self, sensors: Dict[str, jax.Array]):
-        return {k: (v / 127.5 - 1.0) if "image" in k and "digit" not in k else v for k, v in sensors.items()}
+        return {
+            k: (v / 127.5 - 1.0) if "image" in k and "digit" not in k else v
+            for k, v in sensors.items()
+        }
 
     def prepare_batch(self, batch: TrainingBatch):
         return batch.replace(sensors=self.prepare_sensors(batch.sensors))
 
-    def train_step(self, batch: TrainingBatch,):
+    def train_step(
+        self,
+        batch: TrainingBatch,
+    ):
         with self.mesh.mesh, nn.logical_axis_rules([("act_batch", "fsdp")]):
             self.model_state, base_info, self.rng = self.step_fn(
                 self.model_state,
                 self.prepare_batch(batch),
                 self.rng,
             )
-        
-
 
             self.model_state, fuse_info, self.rng = self.fuse_step_fn(
                 self.model_state,
@@ -636,7 +643,6 @@ class PaliVLATrainState:
             )
 
             info = base_info | fuse_info
-
 
         return info
 

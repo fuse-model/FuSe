@@ -1,17 +1,19 @@
+import os
 import pickle
 import time
 
 import gym
 import numpy as np
 from pyquaternion import Quaternion
-from widowx_envs.widowx_env_service import WidowXClient
-import os
 from recursive_dict_print import recursive_dict_print
+from widowx_envs.widowx_env_service import WidowXClient
 
-VERBOSE = os.environ.get('VERBOSE', '').lower() == 'true' 
+VERBOSE = os.environ.get("VERBOSE", "").lower() == "true"
 
-class LostConnection(Exception): 
-    pass 
+
+class LostConnection(Exception):
+    pass
+
 
 def state_to_eep(xyz_coor, zangle: float):
     """
@@ -40,34 +42,32 @@ def wait_for_obs(widowx_client):
     return obs
 
 
-
 unflat_sizes = {
-    "image_0": (480, 640), 
-    "image_1": (480, 640), 
-    "digit": (240, 320), 
-    "background": (240, 320)
+    "image_0": (480, 640),
+    "image_1": (480, 640),
+    "digit": (240, 320),
+    "background": (240, 320),
 }
-possible_prefixes = unflat_sizes.keys() 
+possible_prefixes = unflat_sizes.keys()
+
 
 def convert_obs(obs, im_size=256):
-    processed_obs = {} 
-    for key, val in obs.items(): 
-        prefix = None 
-        for possible_prefix in possible_prefixes: 
-            if key.startswith(possible_prefix): 
+    processed_obs = {}
+    for key, val in obs.items():
+        prefix = None
+        for possible_prefix in possible_prefixes:
+            if key.startswith(possible_prefix):
                 prefix = possible_prefix
                 break
 
-        if prefix is not None: 
-            resize_size = unflat_sizes[prefix] 
+        if prefix is not None:
+            resize_size = unflat_sizes[prefix]
             full_size = (3,) + resize_size
-            processed_obs[key] = (
-                val.reshape(full_size).transpose(1, 2, 0) #  * 255
-            )
-        else: 
-            processed_obs[key] = val 
-    if "mel_spectro" in obs: 
-        processed_obs['mel_spectro'] = obs['mel_spectro'].reshape((128, 128))
+            processed_obs[key] = val.reshape(full_size).transpose(1, 2, 0)  #  * 255
+        else:
+            processed_obs[key] = val
+    if "mel_spectro" in obs:
+        processed_obs["mel_spectro"] = obs["mel_spectro"].reshape((128, 128))
     return processed_obs
 
 
@@ -106,7 +106,7 @@ class WidowXGym(gym.Env):
                     low=np.ones((8,)) * -1, high=np.ones((8,)), dtype=np.float64
                 ),
             }
-        ) # TODO: update this 
+        )  # TODO: update this
         self.action_space = gym.spaces.Box(
             low=np.zeros((7,)), high=np.ones((7,)), dtype=np.float64
         )
@@ -114,15 +114,15 @@ class WidowXGym(gym.Env):
         self.is_gripper_closed = False
         self.num_consecutive_gripper_change_actions = 0
 
-    def _add_backgrounds(self, obs): 
-        if hasattr(self, 'back_l'): 
-            obs['background_l'] = self.back_l.copy() 
-            obs['background_r'] = self.back_r.copy() 
-        return obs 
+    def _add_backgrounds(self, obs):
+        if hasattr(self, "back_l"):
+            obs["background_l"] = self.back_l.copy()
+            obs["background_r"] = self.back_r.copy()
+        return obs
 
     def step(self, action):
         # sticky gripper logic
-        start_time = time.time() 
+        start_time = time.time()
         if (action[-1] < 0.5) != self.is_gripper_closed:
             self.num_consecutive_gripper_change_actions += 1
         else:
@@ -134,26 +134,27 @@ class WidowXGym(gym.Env):
         action[-1] = 0.0 if self.is_gripper_closed else 1.0
 
         self.widowx_client.step_action(action, blocking=self.blocking)
-        after_step = time.time() 
+        after_step = time.time()
 
         raw_obs = self.widowx_client.get_observation()
         # print(raw_obs.keys())
-        after_rec_obs = time.time() 
+        after_rec_obs = time.time()
         truncated = False
         if raw_obs is None:
             # this indicates a loss of connection with the server
             # due to an exception in the last step so end the trajectory
             truncated = True
             obs = null_obs(self.im_size)  # obs with all zeros
-            raise LostConnection('Lost connection to server')
+            raise LostConnection("Lost connection to server")
         else:
             obs = convert_obs(raw_obs, self.im_size)
             self._add_backgrounds(obs)
-        end_time = time.time() 
+        end_time = time.time()
 
-
-        if VERBOSE: 
-            print(f'Step:  enter-act={after_step - start_time}  after_act-receive_obs={after_rec_obs - after_step}  receive_obs-end={end_time - after_rec_obs}    end={end_time-start_time}' )
+        if VERBOSE:
+            print(
+                f"Step:  enter-act={after_step - start_time}  after_act-receive_obs={after_rec_obs - after_step}  receive_obs-end={end_time - after_rec_obs}    end={end_time-start_time}"
+            )
 
         return obs, 0, False, truncated, {}
 
@@ -165,19 +166,19 @@ class WidowXGym(gym.Env):
         self.num_consecutive_gripper_change_actions = 0
 
         raw_obs = wait_for_obs(self.widowx_client)
-        if VERBOSE: 
-            print('########################\nRaw observation:    ') 
+        if VERBOSE:
+            print("########################\nRaw observation:    ")
             recursive_dict_print(raw_obs)
         obs = convert_obs(raw_obs, self.im_size)
-        if 'digit_l' in obs: 
-            self.back_l = obs['digit_l'].copy()
-            self.back_r = obs['digit_r'].copy() 
+        if "digit_l" in obs:
+            self.back_l = obs["digit_l"].copy()
+            self.back_r = obs["digit_r"].copy()
             obs = self._add_backgrounds(obs)
-        else: 
+        else:
             raise RuntimeError
-        if VERBOSE: 
-            print('########################\nConverted observation:     ')
+        if VERBOSE:
+            print("########################\nConverted observation:     ")
             recursive_dict_print(obs)
-            print('########################\n')
-        print('WidowxEnv reset!')
+            print("########################\n")
+        print("WidowxEnv reset!")
         return obs, {}

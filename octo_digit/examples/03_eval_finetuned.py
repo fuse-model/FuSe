@@ -14,10 +14,9 @@ from absl import app, flags, logging
 import gym
 import jax
 import numpy as np
-import wandb
-
 from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
+import wandb
 
 FLAGS = flags.FLAGS
 

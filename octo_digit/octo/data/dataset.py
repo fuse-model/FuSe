@@ -1,29 +1,27 @@
-from functools import partial
+from dataclasses import dataclass
+from functools import partial, reduce
+from itertools import chain
 import json
-from typing import Callable, Mapping, Optional, Sequence, Tuple, Union, Iterable, Any
+from operator import mul
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import dlimp as dl
 import numpy as np
-import tensorflow as tf
-import tensorflow_datasets as tfds
-
 from octo.data import obs_transforms, traj_transforms
 from octo.data.utils import goal_relabeling, task_augmentation
 from octo.data.utils.data_utils import (
     allocate_threads,
+    AnnotationSelectionManager,
     get_dataset_statistics,
     normalize_action_and_proprio,
     pprint_data_mixture,
     sample_match_keys_uniform,
     tree_map,
-    AnnotationSelectionManager
 )
 from octo.utils.spec import ModuleSpec
-from dataclasses import dataclass
-from itertools import chain 
-from functools import reduce
-from operator import mul
+import tensorflow as tf
+import tensorflow_datasets as tfds
 
 
 def apply_trajectory_transforms(
@@ -101,7 +99,7 @@ def apply_trajectory_transforms(
                 tf.math.abs(x["observation"]["proprio"]) <= max_proprio
             )
         )
-    
+
     # marks which entires of the observation and task dicts are padding
     dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls)
 
@@ -169,7 +167,7 @@ def apply_frame_transforms(
     resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
     depth_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
     digit_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
-    background_subtraction_map: Mapping[str, str] = {}, 
+    background_subtraction_map: Mapping[str, str] = {},
     image_dropout_prob: float = 0.0,
     image_dropout_keep_key: Optional[str] = None,
     num_parallel_calls: int = tf.data.AUTOTUNE,
@@ -191,8 +189,8 @@ def apply_frame_transforms(
             keys (so pass an empty dict to skip resizing for all images).
         depth_resize_size (Tuple[int, int]|Mapping[str, Tuple[int, int]]): Same as resize_size, but for depth
             images.
-        background_subtraction_map: a mapping from timestep_observation to background_observation keys, for 
-            applying background subtraction for tactile sensors. 
+        background_subtraction_map: a mapping from timestep_observation to background_observation keys, for
+            applying background subtraction for tactile sensors.
         image_dropout_prob (float): Probability of dropping out images, applied to each image key
             independently. At least one image will always be present.
         image_dropout_keep_key (str, optional): Optionally provide a key to always keep during image dropout
@@ -217,16 +215,16 @@ def apply_frame_transforms(
                 obs_transforms.decode_and_resize,
                 resize_size=resize_size,
                 depth_resize_size=depth_resize_size,
-                digit_resize_size=digit_resize_size
+                digit_resize_size=digit_resize_size,
             ),
         ),
         num_parallel_calls,
     )
-    
-    dataset = dataset.frame_map( 
-        partial( 
+
+    dataset = dataset.frame_map(
+        partial(
             obs_transforms.background_subtraction,
-            background_subtraction_map=background_subtraction_map
+            background_subtraction_map=background_subtraction_map,
         )
     )
 
@@ -264,20 +262,20 @@ def make_dataset_from_rlds(
     proprio_obs_key: Optional[str] = None,
     sensor_obs_keys: Mapping[str, Optional[str]] = {},
     language_key: Optional[str] = None,
-    annotation_manager_kwargs: Mapping[str, Any] = {},  
-    modality_keep_probabilities: Optional[dict[str, float]] = None, 
-    modality_remove_keys: Optional[Iterable[str]] = None, 
+    annotation_manager_kwargs: Mapping[str, Any] = {},
+    modality_keep_probabilities: Optional[dict[str, float]] = None,
+    modality_remove_keys: Optional[Iterable[str]] = None,
     dataset_statistics: Optional[Union[dict, str]] = None,
     force_recompute_dataset_statistics: bool = False,
     action_normalization_mask: Optional[Sequence[bool]] = None,
-    digit_background_subtraction: Optional[bool] = True, 
+    digit_background_subtraction: Optional[bool] = True,
     filter_functions: Sequence[ModuleSpec] = (),
     skip_norm: bool = False,
     norm_type: str = "normal",
     ignore_errors: bool = False,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
-    num_gpt_gen_arg: int = -1, 
+    num_gpt_gen_arg: int = -1,
 ) -> Tuple[dl.DLataset, dict]:
     """This function is responsible for loading a specific RLDS dataset from storage and getting it into a
     standardized format. Yields a dataset of trajectories. Does not include CPU-intensive operations.
@@ -313,20 +311,20 @@ def make_dataset_from_rlds(
             prefixed with "depth_" instead of "image_".
         proprio_obs_key (str, optional): If provided, the "obs" dict will contain the key "proprio", extracted from
             `traj["observation"][proprio_obs_key]`.
-        sensor_obs_keys: Similar to proprio_obs_keys, a mapping of {new: old} names for other sensor data, for 
+        sensor_obs_keys: Similar to proprio_obs_keys, a mapping of {new: old} names for other sensor data, for
             example microphone or IMU
         language_key (str, optional): If provided, the "task" dict will contain the key
             "language_instruction", extracted from `traj[language_key]`. If language_key fnmatches multiple
             keys, we sample one uniformly.
         annotation_manager_kwargs: For creating an AnnotationSelectionManager object, to randomly select and manage annotations.
-        modality_keep_probabilities (optional): a dictionary probabilities of keeping each modality in an annotation, e.g. 
+        modality_keep_probabilities (optional): a dictionary probabilities of keeping each modality in an annotation, e.g.
             the probability of keeping the visual portion of the annotation, the tactile portion, the audio, etc.
-            During training, annotations are selected randomly according to these probabilities, e.g. the visual-tactile annotation is 
+            During training, annotations are selected randomly according to these probabilities, e.g. the visual-tactile annotation is
             selected with probability P(keep visual) * P(keep tactile) * (1 - P(keep audio)), assuming these three modalities are the
-            only available. 
-            None if modality dropout is not used. 
+            only available.
+            None if modality dropout is not used.
         modality_remove_keys (optional): a list of types of annotation combinations to remove, typically including the null annotation
-            and the audio-only annotation. 
+            and the audio-only annotation.
         dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset statistics
             for normalization. May also provide "num_transitions" and "num_trajectories" keys for downstream usage
             (e.g., for `make_interleaved_dataset`). If not provided, the statistics will be computed on the fly.
@@ -349,7 +347,7 @@ def make_dataset_from_rlds(
             - depth_{name1, name2, ...} # depth image observations
             - digit_{name1, name2, ...} # DIGIT readings
             - proprio                   # 1-dimensional array of proprioceptive observations
-            - sensor_obs                # 
+            - sensor_obs                #
             - timestep                  # timestep of each frame
         - task:
             - language_instruction      # language instruction, present if `language_key` is provided
@@ -357,7 +355,15 @@ def make_dataset_from_rlds(
         - dataset_name                  # name of the dataset
     """
     REQUIRED_KEYS = {"observation", "action"}
-    def _restructure(traj, annotation_keys=None, lang_info_str=None, num_gpt_gen=-1, rephrase_prefixes=None, all_lang_prefixes=None):
+
+    def _restructure(
+        traj,
+        annotation_keys=None,
+        lang_info_str=None,
+        num_gpt_gen=-1,
+        rephrase_prefixes=None,
+        all_lang_prefixes=None,
+    ):
         # apply a standardization function, if provided
         if standardize_fn is not None:
             traj = ModuleSpec.instantiate(standardize_fn)(traj)
@@ -383,7 +389,7 @@ def make_dataset_from_rlds(
                 new_obs[f"depth_{new}"] = tf.repeat("", traj_len)  # padding
             else:
                 new_obs[f"depth_{new}"] = old_obs[old]
-                
+
         if proprio_obs_key is not None:
             new_obs["proprio"] = tf.cast(old_obs[proprio_obs_key], tf.float32)
 
@@ -398,42 +404,59 @@ def make_dataset_from_rlds(
 
         # extracts `language_key` into the "task" dict, or samples uniformly if `language_key` fnmatches multiple keys
         task = {}
-        multimodal_keys = None 
+        multimodal_keys = None
         if language_key is not None:
-            num_strs = len(lang_info_str.split('|'))
-            if language_key == 'all_lang_list':
-                all_lang = {f'all_lang_{i}': traj[f'all_lang_{i}'] for i in range(num_strs)}
+            num_strs = len(lang_info_str.split("|"))
+            if language_key == "all_lang_list":
+                all_lang = {
+                    f"all_lang_{i}": traj[f"all_lang_{i}"] for i in range(num_strs)
+                }
                 task.update(all_lang)
-                
-            elif language_key == 'rephrase': 
-                for i in range(len(rephrase_prefixes)): 
+
+            elif language_key == "rephrase":
+                for i in range(len(rephrase_prefixes)):
                     # idx = tf.random.uniform((), 0, num_gpt_gen, dtype=tf.int32)
-                    # match_keys = 
+                    # match_keys =
                     # idx = np.random.randint(0, high=num_gpt_gen)
                     # key = f'{rephrase_prefixes[i]}_{idx}'
                     # task[all_lang_prefixes[i]] = traj[key]
-                    task[all_lang_prefixes[i]] = sample_match_keys_uniform(traj, f'{rephrase_prefixes[i]}_*', verbose=False)
+                    task[all_lang_prefixes[i]] = sample_match_keys_uniform(
+                        traj, f"{rephrase_prefixes[i]}_*", verbose=False
+                    )
                 # indices = tf.random.uniform((len(rephrase_prefixes),), 0, num_gpt_gen, dtype=tf.int32)
                 # keys = [f'{prefix}_{idx}' for prefix, idx in zip(rephrase_prefixes, indices)]
                 # print(keys)
-                # for all_lang_key, key in zip(all_lang_prefixes, keys): 
+                # for all_lang_key, key in zip(all_lang_prefixes, keys):
                 #     task[all_lang_key] = traj[key]
-            elif language_key == 'rephrase_batch' or language_key == 'rephrase_batch_full' or language_key == 'rephrase_batch_full_target': 
+            elif (
+                language_key == "rephrase_batch"
+                or language_key == "rephrase_batch_full"
+                or language_key == "rephrase_batch_full_target"
+            ):
                 all_rephrased = {
-                    k : v for k, v in traj.items() if k.startswith('rephrase') and int(k.split('_')[-1]) < num_gpt_gen
+                    k: v
+                    for k, v in traj.items()
+                    if k.startswith("rephrase") and int(k.split("_")[-1]) < num_gpt_gen
                 }
                 task.update(all_rephrased)
-                if language_key == 'rephrase_batch_full_target' or language_key == 'rephrase_batch_full':
+                if (
+                    language_key == "rephrase_batch_full_target"
+                    or language_key == "rephrase_batch_full"
+                ):
                     targets = {
-                        f'target_{k}': v for k, v in traj.items() if k.startswith('all_lang')
+                        f"target_{k}": v
+                        for k, v in traj.items()
+                        if k.startswith("all_lang")
                     }
                     task.update(targets)
-            elif language_key == 'multimodal_annotations':
-                if annotation_keys is not None: 
-                    for key in annotation_keys: 
+            elif language_key == "multimodal_annotations":
+                if annotation_keys is not None:
+                    for key in annotation_keys:
                         task[key] = traj[key]
-            else: 
-                task["language_instruction"] = sample_match_keys_uniform(traj, language_key)
+            else:
+                task["language_instruction"] = sample_match_keys_uniform(
+                    traj, language_key
+                )
                 if task["language_instruction"].dtype != tf.string:
                     raise ValueError(
                         f"Language key {language_key} has dtype {task['language_instruction'].dtype}, "
@@ -455,26 +478,33 @@ def make_dataset_from_rlds(
     builder = tfds.builder(name, data_dir=data_dir)
     rephrase_prefixes = None
     all_lang_prefixes = None
-    if language_key == 'all_lang_list': 
-        lang_info_str = builder.info.metadata['all_lang_info']
+    if language_key == "all_lang_list":
+        lang_info_str = builder.info.metadata["all_lang_info"]
         num_gpt_gen = -1
-    elif language_key == 'rephrase' or language_key == 'rephrase_batch' or language_key == 'rephrase_batch_full' or language_key == 'rephrase_batch_full_target': 
-        lang_info_str = builder.info.metadata['rephrased_lang_info']
-        num_gpt_gen = builder.info.metadata['num_annotations_per_modality']
-        annotation_manager_kwargs['num_gpt_gen'] = num_gpt_gen
-        rephrase_prefixes = builder.info.metadata['rephrase_keys']
-        all_lang_prefixes = [prefix.replace('rephrased', 'all_lang') for prefix in rephrase_prefixes]
-        annotation_manager_kwargs['rephrase_prefixes'] = rephrase_prefixes
-        annotation_manager_kwargs['all_lang_prefixes'] = all_lang_prefixes
-        
-    else: 
+    elif (
+        language_key == "rephrase"
+        or language_key == "rephrase_batch"
+        or language_key == "rephrase_batch_full"
+        or language_key == "rephrase_batch_full_target"
+    ):
+        lang_info_str = builder.info.metadata["rephrased_lang_info"]
+        num_gpt_gen = builder.info.metadata["num_annotations_per_modality"]
+        annotation_manager_kwargs["num_gpt_gen"] = num_gpt_gen
+        rephrase_prefixes = builder.info.metadata["rephrase_keys"]
+        all_lang_prefixes = [
+            prefix.replace("rephrased", "all_lang") for prefix in rephrase_prefixes
+        ]
+        annotation_manager_kwargs["rephrase_prefixes"] = rephrase_prefixes
+        annotation_manager_kwargs["all_lang_prefixes"] = all_lang_prefixes
+
+    else:
         lang_info_str = None
-        num_gpt_gen = - 1
-    
+        num_gpt_gen = -1
+
     if num_gpt_gen_arg != -1:
         num_gpt_gen = num_gpt_gen_arg
 
-    annotation_manager_kwargs['lang_info_str'] = lang_info_str
+    annotation_manager_kwargs["lang_info_str"] = lang_info_str
     annotation_manager = AnnotationSelectionManager(**annotation_manager_kwargs)
 
     # load or compute dataset statistics
@@ -487,7 +517,14 @@ def make_dataset_from_rlds(
             full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
         if ignore_errors:
             full_dataset = full_dataset.ignore_errors()
-        restructure = partial(_restructure, annotation_keys=None, lang_info_str=lang_info_str, num_gpt_gen=num_gpt_gen, rephrase_prefixes=rephrase_prefixes, all_lang_prefixes=all_lang_prefixes)
+        restructure = partial(
+            _restructure,
+            annotation_keys=None,
+            lang_info_str=lang_info_str,
+            num_gpt_gen=num_gpt_gen,
+            rephrase_prefixes=rephrase_prefixes,
+            all_lang_prefixes=all_lang_prefixes,
+        )
         full_dataset = full_dataset.traj_map(restructure).filter(is_nonzero_length)
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
@@ -531,31 +568,57 @@ def make_dataset_from_rlds(
     if ignore_errors:
         dataset = dataset.ignore_errors()
 
-    annotation_keys = None 
-    annotation_probabilities = None 
-    if language_key == 'multimodal_annotations': 
+    annotation_keys = None
+    annotation_probabilities = None
+    if language_key == "multimodal_annotations":
         example_trajectory = next(dataset.iterator())
-        annotation_keys = {key for key in example_trajectory if key.startswith('annotation_')} 
-        
+        annotation_keys = {
+            key for key in example_trajectory if key.startswith("annotation_")
+        }
+
         annotation_keys = sorted(
-            annotation_keys - {key if key.startswith('annotation_') else f'annotation_{key}' for key in modality_remove_keys}
+            annotation_keys
+            - {
+                key if key.startswith("annotation_") else f"annotation_{key}"
+                for key in modality_remove_keys
+            }
         )
-        all_modality_names = set(chain.from_iterable([key[len('annotation_'):].split(',') for key in annotation_keys]))
-        annotation_probabilities =  np.array([   
-            reduce(
-                mul, 
-                [modality_keep_probabilities[modality] if modality in modalities_tuple else 1 - modality_keep_probabilities[modality] for modality in all_modality_names]
+        all_modality_names = set(
+            chain.from_iterable(
+                [key[len("annotation_") :].split(",") for key in annotation_keys]
             )
-            for modalities_tuple in [key[len('annotation_'):].split(',') for key in annotation_keys]
-        ])
+        )
+        annotation_probabilities = np.array(
+            [
+                reduce(
+                    mul,
+                    [
+                        modality_keep_probabilities[modality]
+                        if modality in modalities_tuple
+                        else 1 - modality_keep_probabilities[modality]
+                        for modality in all_modality_names
+                    ],
+                )
+                for modalities_tuple in [
+                    key[len("annotation_") :].split(",") for key in annotation_keys
+                ]
+            ]
+        )
         annotation_probabilities /= np.sum(annotation_probabilities)
-        annotation_probabilities[-1] += 1 - np.sum(annotation_probabilities) # probabilities need to sum to 1, avoid floating point error 
+        annotation_probabilities[-1] += 1 - np.sum(
+            annotation_probabilities
+        )  # probabilities need to sum to 1, avoid floating point error
         raise NotImplementedError
 
-
-    
-    restructure = partial(_restructure, annotation_keys=annotation_keys, lang_info_str=lang_info_str, num_gpt_gen=num_gpt_gen, rephrase_prefixes=rephrase_prefixes, all_lang_prefixes=all_lang_prefixes)
-    dataset = dataset.traj_map(restructure, num_parallel_calls).filter( 
+    restructure = partial(
+        _restructure,
+        annotation_keys=annotation_keys,
+        lang_info_str=lang_info_str,
+        num_gpt_gen=num_gpt_gen,
+        rephrase_prefixes=rephrase_prefixes,
+        all_lang_prefixes=all_lang_prefixes,
+    )
+    dataset = dataset.traj_map(restructure, num_parallel_calls).filter(
         is_nonzero_length
     )
 
@@ -572,9 +635,7 @@ def make_dataset_from_rlds(
         logging.warning(
             "Dataset normalization turned off -- set skip_norm=False to apply normalization."
         )
-    dataset.supp_info = {
-        'annotation_manager': annotation_manager
-    }
+    dataset.supp_info = {"annotation_manager": annotation_manager}
     return dataset, dataset_statistics
 
 
@@ -600,7 +661,6 @@ def make_single_dataset(
     supp_info = dataset.supp_info
     dataset = apply_trajectory_transforms(dataset, **traj_transform_kwargs, train=train)
     dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train)
-
 
     # this seems to reduce memory usage without affecting speed
     dataset = dataset.with_ram_budget(1)

@@ -1,16 +1,17 @@
 from functools import partial
 from typing import Optional, Sequence
-import tensorflow as tf
-from ml_collections import ConfigDict
-import numpy as np
 
-from octo.data.utils.data_utils import NormalizationType
-from palivla.tokenizer import Tokenizer
-from octo.data.dataset import make_interleaved_dataset, make_single_dataset
-from octo.data.oxe import make_oxe_dataset_kwargs_and_weights, make_oxe_dataset_kwargs
 import dlimp
 import jax
 import jax.numpy as jnp
+from ml_collections import ConfigDict
+import numpy as np
+from octo.data.dataset import make_interleaved_dataset, make_single_dataset
+from octo.data.oxe import make_oxe_dataset_kwargs, make_oxe_dataset_kwargs_and_weights
+from octo.data.utils.data_utils import NormalizationType
+from palivla.tokenizer import Tokenizer
+import tensorflow as tf
+
 
 # Filter unmasked modalities to match modality_idx
 # the modalities, in order, are:
@@ -22,31 +23,59 @@ def create_fuse_modal_mask(data):
     modal_masks = jax.tree.map(lambda leaf: leaf, sensor_masks)
 
     modal_masks["image_primary"] = sensor_masks["image_primary"] & (
-        (modality_idx == 0) | (modality_idx == 2) | (modality_idx == 5) | (modality_idx == 6) | (modality_idx == 8)
+        (modality_idx == 0)
+        | (modality_idx == 2)
+        | (modality_idx == 5)
+        | (modality_idx == 6)
+        | (modality_idx == 8)
     )
     modal_masks["image_wrist"] = sensor_masks["image_wrist"] & (
-        (modality_idx == 0) | (modality_idx == 2) | (modality_idx == 5) | (modality_idx == 6) | (modality_idx == 8)
+        (modality_idx == 0)
+        | (modality_idx == 2)
+        | (modality_idx == 5)
+        | (modality_idx == 6)
+        | (modality_idx == 8)
     )
     modal_masks["image_digit_left"] = sensor_masks["image_digit_left"] & (
-        (modality_idx == 0) | (modality_idx == 3) | (modality_idx == 5) | (modality_idx == 7) | (modality_idx == 8)
+        (modality_idx == 0)
+        | (modality_idx == 3)
+        | (modality_idx == 5)
+        | (modality_idx == 7)
+        | (modality_idx == 8)
     )
     modal_masks["image_digit_right"] = sensor_masks["image_digit_right"] & (
-        (modality_idx == 0) | (modality_idx == 3) | (modality_idx == 5) | (modality_idx == 7) | (modality_idx == 8)
+        (modality_idx == 0)
+        | (modality_idx == 3)
+        | (modality_idx == 5)
+        | (modality_idx == 7)
+        | (modality_idx == 8)
     )
     modal_masks["mel_spectro"] = sensor_masks["mel_spectro"] & (
-        (modality_idx == 0) | (modality_idx == 4) | (modality_idx == 6) | (modality_idx == 7) | (modality_idx == 8)
+        (modality_idx == 0)
+        | (modality_idx == 4)
+        | (modality_idx == 6)
+        | (modality_idx == 7)
+        | (modality_idx == 8)
     )
     data["observation"]["modal_pad_mask_dict"] = modal_masks
     return data
 
 
-# if mic_mask = True, then this is an audio task, and no tactile instruction is valid 
+# if mic_mask = True, then this is an audio task, and no tactile instruction is valid
 # if mic_mask = False, then the audio data is masked, and any audio instruction is not valid
-def enforce_valid_language_instruction(mask_loss_fuse: jax.Array, modality_idx: jax.Array, mic_mask: jax.Array):
-    mask_loss_fuse = mask_loss_fuse & jnp.expand_dims((
-        (mic_mask & ((modality_idx != 3) & (modality_idx != 5) & (modality_idx != 7))) |
-        (~mic_mask & ((modality_idx != 4)))
-    ), axis=-1)
+def enforce_valid_language_instruction(
+    mask_loss_fuse: jax.Array, modality_idx: jax.Array, mic_mask: jax.Array
+):
+    mask_loss_fuse = mask_loss_fuse & jnp.expand_dims(
+        (
+            (
+                mic_mask
+                & ((modality_idx != 3) & (modality_idx != 5) & (modality_idx != 7))
+            )
+            | (~mic_mask & ((modality_idx != 4)))
+        ),
+        axis=-1,
+    )
     return mask_loss_fuse
 
 
@@ -90,7 +119,7 @@ def process_rephrase_tf(
     data["task"]["language_instruction"] = tf.where(
         should_rephrase, rephrases[modality_idx, rephrase_idx], targets[modality_idx]
     )
-    
+
     data["modality_idx"] = modality_idx
     data["observation"]["modality_idx"] = modality_idx
     return data
@@ -139,7 +168,9 @@ def tactile_to_image(data):
 
 
 def process_mic_mask(data):
-    data["mic_mask"] = tf.squeeze(tf.cast(data["observation"]["mic_mask"], tf.bool), axis=-1)
+    data["mic_mask"] = tf.squeeze(
+        tf.cast(data["observation"]["mic_mask"], tf.bool), axis=-1
+    )
     return data
 
 
@@ -155,8 +186,8 @@ def make_base_dataset(
     traj_transform_threads: int,
     traj_read_threads: int,
 ) -> dlimp.DLataset:
-    dataset_kwargs_list, sample_weights = (
-        make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
+    dataset_kwargs_list, sample_weights = make_oxe_dataset_kwargs_and_weights(
+        **oxe_kwargs
     )
     dataset = make_interleaved_dataset(
         dataset_kwargs_list,
@@ -173,6 +204,7 @@ def make_base_dataset(
 
     return dataset
 
+
 # quick hack to make digit dataset in the same way
 def make_base_dataset_digit(
     *,
@@ -186,11 +218,11 @@ def make_base_dataset_digit(
     traj_transform_threads: int,
     traj_read_threads: int,
 ) -> dlimp.DLataset:
-    sample_weights = [ 1.0 for _ in dataset_kwargs_list ]
+    sample_weights = [1.0 for _ in dataset_kwargs_list]
     sample_weight_norm = sum(sample_weights)
     sample_weights = [weight / sample_weight_norm for weight in sample_weights]
     sample_weights[-1] += 1 - sum(sample_weights)
-    
+
     dataset = make_interleaved_dataset(
         dataset_kwargs_list,
         sample_weights,
@@ -244,6 +276,7 @@ def make_base_single_dataset(
     dataset.dataset_statistics = dataset_statistics
     return dataset
 
+
 def make_frame_transform(
     multimodal_rephrasings: bool,
     multimodal_rephrasing_kwargs: dict,
@@ -260,8 +293,7 @@ def make_frame_transform(
             data = mel_spectro_to_image(data)
             data = tactile_to_image(data)
             data = create_fuse_modal_mask(data)
-            
-            
+
         if chunk_relative_actions:
             # Gripper is absolute, rest is relative
             if gripper_relative_actions:

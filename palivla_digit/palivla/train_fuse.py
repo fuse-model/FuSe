@@ -1,29 +1,27 @@
+from absl import app, flags
+from absl import logging as absl_logging
+import flax
 import jax
 import jax.numpy as jnp
-import orbax.checkpoint as ocp
-import flax
-
-import tensorflow as tf
-import tqdm
-from absl import app, flags, logging as absl_logging
 from ml_collections import config_flags
-from scalax.sharding import (
-    MeshShardingHelper,
-    FSDPShardingRule,
-    PartitionSpec,
-)
-
-import wandb
 import numpy as np
-
-from palivla.dataset import make_base_dataset_digit, make_base_dataset, make_base_single_dataset, transform_dataset
 from octo.data.dataset import make_single_dataset
+import orbax.checkpoint as ocp
+from palivla.dataset import (
+    make_base_dataset,
+    make_base_dataset_digit,
+    make_base_single_dataset,
+    transform_dataset,
+)
 from palivla.load_model import make_optimizer
 from palivla.spec import OptimizerSpec
 from palivla.train_state import PaliVLATrainState
 from palivla.train_step import TrainingBatch
 from palivla.utils import host_broadcast_str
-
+from scalax.sharding import FSDPShardingRule, MeshShardingHelper, PartitionSpec
+import tensorflow as tf
+import tqdm
+import wandb
 
 jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
@@ -55,18 +53,28 @@ def main(_):
         "text": jax.ShapeDtypeStruct(shape=(1, 10), dtype=jnp.int32),
         "image_primary": jax.ShapeDtypeStruct(shape=(1, 224, 224, 3), dtype=jnp.uint8),
         "image_wrist": jax.ShapeDtypeStruct(shape=(1, 224, 224, 3), dtype=jnp.uint8),
-        "image_digit_left": jax.ShapeDtypeStruct(shape=(1, 224, 224, 3), dtype=jnp.float32),
-        "image_digit_right": jax.ShapeDtypeStruct(shape=(1, 224, 224, 3), dtype=jnp.float32),
+        "image_digit_left": jax.ShapeDtypeStruct(
+            shape=(1, 224, 224, 3), dtype=jnp.float32
+        ),
+        "image_digit_right": jax.ShapeDtypeStruct(
+            shape=(1, 224, 224, 3), dtype=jnp.float32
+        ),
         "mel_spectro": jax.ShapeDtypeStruct(shape=(1, 224, 224, 3), dtype=jnp.float32),
         "proprio": jax.ShapeDtypeStruct(shape=(1, 6), dtype=jnp.float32),
         "modality_idx": jax.ShapeDtypeStruct(shape=(1, 1), dtype=jnp.int32),
     }
-    if config.resume_from_checkpoint_dir is not None: # load in pretrained model and merge in weights that exist already
+    if (
+        config.resume_from_checkpoint_dir is not None
+    ):  # load in pretrained model and merge in weights that exist already
         restore_checkpoint_manager = ocp.CheckpointManager(
             config.resume_from_checkpoint_dir,
             item_handlers=PaliVLATrainState.get_checkpoint_handlers(),
         )
-        loaded_model, pretrained_action_tokenizer_state, loaded_language_tokenizer = PaliVLATrainState.load_components(
+        (
+            loaded_model,
+            pretrained_action_tokenizer_state,
+            loaded_language_tokenizer,
+        ) = PaliVLATrainState.load_components(
             checkpoint_manager=restore_checkpoint_manager,
             step=config.resume_from_checkpoint_step,
             load_optimizer=True,
@@ -102,9 +110,8 @@ def main(_):
         action_horizon=action_horizon,
         pretrained_params=pretrained_params,
         pretrained_action_tokenizer_state=pretrained_action_tokenizer_state,
-        loaded_language_tokenizer=loaded_language_tokenizer
+        loaded_language_tokenizer=loaded_language_tokenizer,
     )
-    
 
     # Construct the final dataset
     # We need to do this after the model is constructed, since we need to have a tokenizer
@@ -123,14 +130,14 @@ def main(_):
             k: np.squeeze(batch["observation"]["pad_mask_dict"][k], axis=-1)
             for k in model.model_state.model.modality_mappings
             if k != "text" and k != "modality_idx"
-        } # modality_idx mask added later depending on whether in a fuse step or not
+        }  # modality_idx mask added later depending on whether in a fuse step or not
 
         modal_mask = {
             k: np.squeeze(batch["observation"]["modal_pad_mask_dict"][k], axis=-1)
             for k in model.model_state.model.modality_mappings
             if k != "text" and k != "modality_idx"
         }
-        
+
         return mesh.local_data_to_global_array(
             TrainingBatch(
                 sensors=sensors,
@@ -177,7 +184,6 @@ def main(_):
             )
         )
 
-
     train_it = map(
         make_training_batch,
         transform_dataset(
@@ -218,8 +224,8 @@ def main(_):
     if jax.process_index() == 0:
         wandb_kwargs = {"project": config.wandb_project, "tags": [config.data_mix]}
 
-        if 'wandb_run_name' in config.to_dict() and config.wandb_run_name is not None:
-            wandb_kwargs["name"] = config.wandb_run_name    
+        if "wandb_run_name" in config.to_dict() and config.wandb_run_name is not None:
+            wandb_kwargs["name"] = config.wandb_run_name
 
         wandb.init(**wandb_kwargs)
         wandb.config.update(config.to_dict())
@@ -241,7 +247,9 @@ def main(_):
 
     # Main training loop
     start_step = model.model_state.step.item()
-    with tqdm.trange(start_step, config.num_steps, desc="Training", dynamic_ncols=True) as pbar:
+    with tqdm.trange(
+        start_step, config.num_steps, desc="Training", dynamic_ncols=True
+    ) as pbar:
         for i in pbar:
             batch = next(train_it)
             info = model.train_step(batch)
@@ -283,7 +291,7 @@ def main(_):
             if (i + 1) % config.save_interval == 0:
                 if config.save_path is not None:
                     print(f"Saving model to {config.save_path}/{i}")
-                    checkpoint_save_manager.save(i+1, args=model.save_args())
+                    checkpoint_save_manager.save(i + 1, args=model.save_args())
     checkpoint_save_manager.wait_until_finished()
 
 

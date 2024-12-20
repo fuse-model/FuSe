@@ -249,13 +249,13 @@ _BASE_SHAPES_DTYPES = {
 
 
 def create_base_checkpoint():
-  """Returns path to fake Bert "base" checkpoint directory (zero init)."""
-  directory = tempfile.mkdtemp()
-  path = f"{directory}/bert_model.ckpt"
-  with tf.Session() as sess:
-    for name, (shape, dtype) in _BASE_SHAPES_DTYPES.items():
-      tf.Variable(tf.zeros(shape, dtype), name=name)
-    saver = tf.train.Saver()
-    sess.run(tf.global_variables_initializer())
-    saver.save(sess, path)
-  return directory
+    """Returns path to fake Bert "base" checkpoint directory (zero init)."""
+    directory = tempfile.mkdtemp()
+    path = f"{directory}/bert_model.ckpt"
+    with tf.Session() as sess:
+        for name, (shape, dtype) in _BASE_SHAPES_DTYPES.items():
+            tf.Variable(tf.zeros(shape, dtype), name=name)
+        saver = tf.train.Saver()
+        sess.run(tf.global_variables_initializer())
+        saver.save(sess, path)
+    return directory

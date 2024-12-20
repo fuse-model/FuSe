@@ -40,7 +40,6 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
-
 _DESCRIPTION = """Screen2words dataset."""
 _CITATION = """
 @inproceedings{wang2021screen2words,
@@ -69,52 +68,52 @@ _SPLITS_TO_GENERATE = ["train", "dev", "test"]
 
 
 class Screen2Words(tfds.core.GeneratorBasedBuilder):
-  """DatasetBuilder for the Screen2words dataset."""
+    """DatasetBuilder for the Screen2words dataset."""
 
-  VERSION = tfds.core.Version("1.0.0")
-  RELEASE_NOTES = {"1.0.0": "First release."}
+    VERSION = tfds.core.Version("1.0.0")
+    RELEASE_NOTES = {"1.0.0": "First release."}
 
-  def _info(self):
-    """Returns the metadata."""
+    def _info(self):
+        """Returns the metadata."""
 
-    return tfds.core.DatasetInfo(
-        builder=self,
-        description=_DESCRIPTION,
-        features=tfds.features.FeaturesDict({
-            "image/id": tfds.features.Scalar(np.int32),
-            "image/filename": tfds.features.Text(),
-            "image": tfds.features.Image(encoding_format="jpeg"),
-            "summary": tfds.features.Sequence(tfds.features.Text()),
-        }),
-        supervised_keys=None,
-        homepage="https://github.com/google-research-datasets/screen2words",
-        citation=_CITATION,
-    )
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict(
+                {
+                    "image/id": tfds.features.Scalar(np.int32),
+                    "image/filename": tfds.features.Text(),
+                    "image": tfds.features.Image(encoding_format="jpeg"),
+                    "summary": tfds.features.Sequence(tfds.features.Text()),
+                }
+            ),
+            supervised_keys=None,
+            homepage="https://github.com/google-research-datasets/screen2words",
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Returns SplitGenerators."""
-    return {split: self._generate_examples(split)
-            for split in _SPLITS_TO_GENERATE}
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Returns SplitGenerators."""
+        return {split: self._generate_examples(split) for split in _SPLITS_TO_GENERATE}
 
-  def _generate_examples(self, split: str):
-    """Yields (key, example) tuples from test set."""
-    id_list_fname = os.path.join(
-        _SCREEN2WORDS_DIR, "split", f"{split}_screens.txt")
-    with open(id_list_fname, "r") as fin:
-      split_ids = fin.readlines()
+    def _generate_examples(self, split: str):
+        """Yields (key, example) tuples from test set."""
+        id_list_fname = os.path.join(_SCREEN2WORDS_DIR, "split", f"{split}_screens.txt")
+        with open(id_list_fname, "r") as fin:
+            split_ids = fin.readlines()
 
-    summaries_fname = os.path.join(_SCREEN2WORDS_DIR, "screen_summaries.csv")
-    summaries = collections.defaultdict(list)
-    with open(summaries_fname, "r") as fin:
-      for entry in csv.DictReader(fin):
-        summaries[int(entry["screenId"])].append(entry["summary"])
+        summaries_fname = os.path.join(_SCREEN2WORDS_DIR, "screen_summaries.csv")
+        summaries = collections.defaultdict(list)
+        with open(summaries_fname, "r") as fin:
+            for entry in csv.DictReader(fin):
+                summaries[int(entry["screenId"])].append(entry["summary"])
 
-    for line in split_ids:
-      line = line.strip()
-      image_id = int(line)
-      yield image_id, {
-          "image/id": image_id,
-          "image/filename": f"{image_id}.jpg",
-          "image": os.path.join(_RICO_DIR, f"{image_id}.jpg"),
-          "summary": summaries[image_id],
-      }
+        for line in split_ids:
+            line = line.strip()
+            image_id = int(line)
+            yield image_id, {
+                "image/id": image_id,
+                "image/filename": f"{image_id}.jpg",
+                "image": os.path.join(_RICO_DIR, f"{image_id}.jpg"),
+                "summary": summaries[image_id],
+            }

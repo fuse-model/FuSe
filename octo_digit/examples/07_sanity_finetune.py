@@ -1,13 +1,6 @@
-from PIL import Image
-
 from absl import app, flags, logging
 import flax
 import jax
-import optax
-import tensorflow as tf
-import tqdm
-import wandb
-
 from octo.data.dataset import make_single_dataset
 from octo.data.utils.data_utils import NormalizationType
 from octo.model.components.action_heads import L1ActionHead
@@ -21,6 +14,11 @@ from octo.utils.train_utils import (
     process_text,
     TrainState,
 )
+import optax
+from PIL import Image
+import tensorflow as tf
+import tqdm
+import wandb
 
 FLAGS = flags.FLAGS
 
@@ -68,11 +66,19 @@ def main(_):
             language_key="language_instruction",
             action_proprio_normalization_type=NormalizationType.NORMAL,
             absolute_action_mask=[False, False, False, False, False, False, True],
-            action_normalization_mask = [True, True, True, True, True, True, False] # Add normalization mask
+            action_normalization_mask=[
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                False,
+            ],  # Add normalization mask
         ),
         traj_transform_kwargs=dict(
             window_size=2,
-            future_action_window_size=3, 
+            future_action_window_size=3,
         ),
         frame_transform_kwargs=dict(
             resize_size={"primary": (256, 256)},
@@ -162,45 +168,44 @@ def main(_):
     num_steps = FLAGS.num_finetuning_steps
     for i in tqdm.tqdm(range(num_steps), total=num_steps, dynamic_ncols=True):
         j = -1
-        while True: 
+        while True:
             j += 1
             batch = next(train_data_iter)
-            img_obs = batch['observation']['image_primary']
-            if not img_obs.any(): 
+            img_obs = batch["observation"]["image_primary"]
+            if not img_obs.any():
                 print(j)
-                continue 
+                continue
             print("success:   ", j)
-            for k1 in range(img_obs.shape[0]): 
-                for k2 in range(img_obs.shape[1]): 
+            for k1 in range(img_obs.shape[0]):
+                for k2 in range(img_obs.shape[1]):
                     img_test = img_obs[k1, k2, ...]
-                    if img_test.any(): 
+                    if img_test.any():
                         im = Image.fromarray(img_test)
                         im.save(f"./test_img_{j}_{k1}_{k2}.jpeg")
-        
+
         print(batch)
         print(batch.keys())
-        for key, val in batch.items(): 
-            if isinstance(val, dict): 
-                for k, v in val.items(): 
-                    if isinstance(v, dict): 
-                        for k2, v2 in v.items(): 
+        for key, val in batch.items():
+            if isinstance(val, dict):
+                for k, v in val.items():
+                    if isinstance(v, dict):
+                        for k2, v2 in v.items():
                             print(f"{key}     {k}      {k2}     {v2.shape}")
-                    else: 
+                    else:
                         print(f"{key}      {k}     {v.shape}")
-            else:   
+            else:
                 print(f"{key}    {val.shape}")
-        found_img = False 
-        img_obs = batch['observation']['image_primary']
+        found_img = False
+        img_obs = batch["observation"]["image_primary"]
         # for i in range(img_obs.shape[0]):
-        #     for j in range(img_obs.shape[1]): 
-                # img_test = batch['observation']['image_primary'][i, j, ...]
-                # im = Image.fromarray(img_test)
-                # im.save(f"./test_img_{i}_{j}.jpeg")
-                # if img_test.any():
-                #     print(i, j)
-        # while True: 
-            
-        
+        #     for j in range(img_obs.shape[1]):
+        # img_test = batch['observation']['image_primary'][i, j, ...]
+        # im = Image.fromarray(img_test)
+        # im.save(f"./test_img_{i}_{j}.jpeg")
+        # if img_test.any():
+        #     print(i, j)
+        # while True:
+
         # exit(0)
         train_state, update_info = train_step(train_state, batch)
         if (i + 1) % 100 == 0:

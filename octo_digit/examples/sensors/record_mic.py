@@ -21,9 +21,9 @@
 # plt.show()
 
 
-import sounddevice as sd
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import sounddevice as sd
 
 # Settings
 duration = 3  # Duration of the recording in seconds
@@ -31,12 +31,12 @@ fs = 44100  # Sampling frequency
 
 # Record audio
 print("Recording...")
-audio_data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float32')
+audio_data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype="float32")
 sd.wait()  # Wait for recording to finish
 
 # Perform FFT (Fast Fourier Transform) to analyze frequency content
 n = len(audio_data)
-frequencies = np.fft.rfftfreq(n, d=1/fs)  # Real FFT frequencies
+frequencies = np.fft.rfftfreq(n, d=1 / fs)  # Real FFT frequencies
 magnitude_spectrum = np.abs(np.fft.rfft(audio_data, axis=0))
 
 # Plot the waveform and frequency spectrum of the recorded audio

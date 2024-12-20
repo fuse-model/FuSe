@@ -13,14 +13,13 @@ step = {
 """
 from typing import Any, Dict
 
-import tensorflow as tf
-
 from octo.data.utils.data_utils import (
     binarize_gripper_actions,
     invert_gripper_actions,
     rel2abs_gripper_actions,
     relabel_actions,
 )
+import tensorflow as tf
 
 
 def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:

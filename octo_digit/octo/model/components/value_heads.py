@@ -5,7 +5,6 @@ import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-
 from octo.model.components.tokenizers import BinTokenizer
 from octo.utils.typing import PRNGKey
 

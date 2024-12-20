@@ -1,24 +1,14 @@
 from typing import Tuple
-import jax
-import jax.numpy as jnp
 
-import tensorflow as tf
-import tqdm
 from absl import app, flags
-from ml_collections import config_flags
-from scalax.sharding import (
-    MeshShardingHelper,
-    FSDPShardingRule,
-    PartitionSpec,
-)
-
-import wandb
-import numpy as np
 from flax import linen as nn
-from jax.experimental import multihost_utils
-import orbax.checkpoint as ocp
 from flax.core.frozen_dict import freeze
-
+import jax
+from jax.experimental import multihost_utils
+import jax.numpy as jnp
+from ml_collections import config_flags
+import numpy as np
+import orbax.checkpoint as ocp
 from palivla.dataset import make_base_dataset, transform_dataset
 from palivla.load_model import make_optimizer
 from palivla.spec import ModuleSpec, OptimizerSpec
@@ -26,6 +16,10 @@ from palivla.train_state import PaliVLATrainState, ShardingMetadata, TrainState
 from palivla.train_step import TrainingBatch
 from palivla.types import Data, Info
 from palivla.utils import host_broadcast_str, key_string
+from scalax.sharding import FSDPShardingRule, MeshShardingHelper, PartitionSpec
+import tensorflow as tf
+import tqdm
+import wandb
 
 jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
@@ -50,7 +44,9 @@ def main(_):
     try:
         jax.distributed.initialize()
     except:
-        print("Distributed initialization failed, probably because we're not using TPUs")
+        print(
+            "Distributed initialization failed, probably because we're not using TPUs"
+        )
 
     tf.random.set_seed(jax.process_index())
 
@@ -65,8 +61,20 @@ def main(_):
 
     # Make the basic dataset
     # We have to do this first, since we need to know how the dataset is set up before we can construct the model
-    train_ds = transform_dataset(make_base_dataset(config, train=True), None, generation=False, chunk_relative_actions=config.chunk_relative_actions, require_language=False)
-    eval_ds = transform_dataset(make_base_dataset(config, train=False), None, generation=False, chunk_relative_actions=config.chunk_relative_actions, require_language=False)
+    train_ds = transform_dataset(
+        make_base_dataset(config, train=True),
+        None,
+        generation=False,
+        chunk_relative_actions=config.chunk_relative_actions,
+        require_language=False,
+    )
+    eval_ds = transform_dataset(
+        make_base_dataset(config, train=False),
+        None,
+        generation=False,
+        chunk_relative_actions=config.chunk_relative_actions,
+        require_language=False,
+    )
 
     batch_shape = {
         "action": jax.ShapeDtypeStruct(
@@ -83,7 +91,9 @@ def main(_):
         model = TrainState.create(
             name="action_tokenizer",
             model_spec=ModuleSpec.from_dict(config.tokenizer.to_dict()),
-            optimizer_spec=OptimizerSpec.from_dict(config.tokenizer_optimizer.to_dict()),
+            optimizer_spec=OptimizerSpec.from_dict(
+                config.tokenizer_optimizer.to_dict()
+            ),
             rng=jax.random.PRNGKey(0),
             batch_spec=batch_shape["action"],
             sharding_metadata=sharding_metadata,
@@ -125,10 +135,13 @@ def main(_):
     # W&B setup
     if jax.process_index() == 0:
         flat_config_dict = {
-            key_string(k): v for k, v in jax.tree_util.tree_leaves_with_path(config.to_dict())
+            key_string(k): v
+            for k, v in jax.tree_util.tree_leaves_with_path(config.to_dict())
         }
         wandb.init(project=config.wandb_project)
-        wandb.run.name = config.run_name_format.format(wandb_run_id=wandb.run.id, **flat_config_dict)
+        wandb.run.name = config.run_name_format.format(
+            wandb_run_id=wandb.run.id, **flat_config_dict
+        )
         wandb.config.update(config.to_dict())
 
         run_name = wandb.run.name
@@ -197,7 +210,7 @@ def main(_):
             if (i + 1) % config.save_interval == 0:
                 if config.save_path is not None:
                     print(f"Saving model to {config.save_path}/{i}")
-                    checkpoint_save_manager.save(i+1, args=model.save_args())
+                    checkpoint_save_manager.save(i + 1, args=model.save_args())
 
 
 if __name__ == "__main__":

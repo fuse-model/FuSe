@@ -1,5 +1,6 @@
 # Written by Dibya
 from dataclasses import field
+from functools import partial
 import logging
 from multiprocessing.sharedctypes import Value
 from typing import Dict, Optional
@@ -9,30 +10,26 @@ import jax
 import jax.numpy as jnp
 from octo.utils.spec import ModuleSpec
 from octo.utils.typing import Data, Sequence
-from functools import partial
 
 
-def expand_dims_to_shape(
-    array: jax.Array, 
-    shape: tuple
-): 
+def expand_dims_to_shape(array: jax.Array, shape: tuple):
     num_to_add = len(shape) - len(array.shape)
     new_axes = tuple(range(-1, -1 - num_to_add, -1))
     return jnp.expand_dims(array, axis=new_axes)
-    
 
-def masked_gap(
-    image_encoding: jax.Array, 
-    mask: jax.Array
-):
+
+def masked_gap(image_encoding: jax.Array, mask: jax.Array):
     mask = expand_dims_to_shape(mask, image_encoding.shape)
     mask = jnp.broadcast_to(mask, image_encoding.shape)
-    return jnp.mean(image_encoding * mask, axis=-2) / jnp.clip(jnp.mean(mask, axis=-2), a_min=1e-5) 
+    return jnp.mean(image_encoding * mask, axis=-2) / jnp.clip(
+        jnp.mean(mask, axis=-2), a_min=1e-5
+    )
+
 
 class BczEncoder(nn.Module):
     observation_tokenizers: Dict[str, nn.Module]
     max_horizon: int
-    
+
     def __call__(
         self,
         observations: Data,
@@ -42,12 +39,13 @@ class BczEncoder(nn.Module):
         train: bool = False,
     ):
         viz_features = [
-            masked_gap(tok(observations, tasks).tokens, timestep_pad_mask) for _, tok in self.observation_tokenizers.items()  # b t * f 
+            masked_gap(tok(observations, tasks).tokens, timestep_pad_mask)
+            for _, tok in self.observation_tokenizers.items()  # b t * f
         ]
         viz_features = jnp.concatenate(viz_features, axis=-1)
         return viz_features
-        
-        
+
+
 class BczModule(nn.Module):
     """
     Bundles encoder and action, language heads.
@@ -57,7 +55,12 @@ class BczModule(nn.Module):
     heads: Dict[str, nn.Module]
 
     def __call__(
-        self, observations, tasks, timestep_pad_mask, train=True, verbose=False,
+        self,
+        observations,
+        tasks,
+        timestep_pad_mask,
+        train=True,
+        verbose=False,
     ):
         """Run transformer and the main method for all heads. Useful for init.
 
@@ -112,11 +115,12 @@ class BczModule(nn.Module):
             k: ModuleSpec.instantiate(spec)()
             for k, spec in observation_tokenizers.items()
         }
-        def sort_dict(d: dict) -> dict: 
+
+        def sort_dict(d: dict) -> dict:
             dict_keys = sorted(d.keys())
             return {key: d[key] for key in dict_keys}
-        observation_tokenizer_defs = sort_dict(observation_tokenizer_defs)
 
+        observation_tokenizer_defs = sort_dict(observation_tokenizer_defs)
 
         head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
 

@@ -9,11 +9,6 @@ python examples/02_finetune_new_observation_action.py --pretrained_path=hf://rai
 from absl import app, flags, logging
 import flax
 import jax
-import optax
-import tensorflow as tf
-import tqdm
-import wandb
-
 from octo.data.dataset import make_single_dataset
 from octo.model.components.action_heads import L1ActionHead
 from octo.model.components.tokenizers import LowdimObsTokenizer
@@ -26,6 +21,10 @@ from octo.utils.train_utils import (
     process_text,
     TrainState,
 )
+import optax
+import tensorflow as tf
+import tqdm
+import wandb
 
 FLAGS = flags.FLAGS
 

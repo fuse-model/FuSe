@@ -1,24 +1,21 @@
 from functools import partial
 from typing import Dict, Sequence, Tuple
 
+from big_vision.models.proj.paligemma.gemma_bv import Model as GemmaModel
+from big_vision.models.proj.paligemma.paligemma import make_attn_mask
+from big_vision.models.vit import Model as ViTModel
 import chex
 import einops
+from einops import repeat
+import flax
+from flax.core import freeze, FrozenDict
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from einops import repeat
-
-from big_vision.models.proj.paligemma.paligemma import make_attn_mask
-import flax.linen as nn
-
-from big_vision.models.proj.paligemma.gemma_bv import Model as GemmaModel
-from big_vision.models.vit import Model as ViTModel
-
 from palivla.spec import ModuleSpec
 from palivla.types import Data, Info
-from scalax.sharding import MeshShardingHelper, ShardingRule, PartitionSpec
+from scalax.sharding import MeshShardingHelper, PartitionSpec, ShardingRule
 
-from flax.core import FrozenDict, freeze
-import flax
 
 def make_gather_indices(
     total_num_tokens: int, embeds_sizes: jax.Array, reordering: jax.Array
@@ -148,11 +145,14 @@ def collect_embeddings(
     packed_embeds = _gather_values(embeds, gather_indices)
     packed_masks = _gather_values(embed_masks, gather_indices)
     packed_ar = _gather_values(ar_masks, gather_indices)
-    packed_group_membership = jnp.where(packed_masks, _gather_values(group_ids, gather_indices), -1)
+    packed_group_membership = jnp.where(
+        packed_masks, _gather_values(group_ids, gather_indices), -1
+    )
 
     # Find the first and last (+1) true element
     def _find_first_last(x):
         return jnp.argmax(x, axis=0), x.shape[0] - jnp.argmax(x[::-1], axis=0)
+
     groups = {
         k: _find_first_last(packed_group_membership == i)
         for i, k in enumerate(key_order)
@@ -211,10 +211,7 @@ class PaliVLAModel(nn.Module):
                 )
             return result, out
 
-        self.encoders = {
-            "llm": self.llm.embed_tokens,
-            "img": _encode_image,
-        } | {
+        self.encoders = {"llm": self.llm.embed_tokens, "img": _encode_image,} | {
             name: spec.instantiate(name=name)
             for name, spec in self.encoder_specs.items()
         }
@@ -272,7 +269,9 @@ class PaliVLAModel(nn.Module):
             # Add one to the length to account for the modality start tokens
             if masks[modality].ndim < embeds[modality].ndim - 1:
                 embed_masks[modality] = repeat(
-                    masks[modality], "... -> ... t", t=embeds[modality].shape[1],
+                    masks[modality],
+                    "... -> ... t",
+                    t=embeds[modality].shape[1],
                 )
             else:
                 mask = masks[modality]
@@ -470,9 +469,9 @@ def load_from_pretrained(
             jax.debug.print(f"Replacing param {k}")
             params[k] = v
 
-        flat_params =  flax.traverse_util.flatten_dict(params)
+        flat_params = flax.traverse_util.flatten_dict(params)
         for encoder_name, spec in palivla_model.encoder_specs.items():
-            if encoder_name in {'llm', 'img'} or spec.load_fn is None:
+            if encoder_name in {"llm", "img"} or spec.load_fn is None:
                 continue
             jax.debug.print(f"Replacing params for {encoder_name}")
             loaded_params = spec.load_fn(**spec.load_kwargs)
@@ -480,15 +479,21 @@ def load_from_pretrained(
                 if k[0] == encoder_name:
                     loaded_key = k[1:]
                     if loaded_key not in loaded_params:
-                        jax.debug.print(f'Param {loaded_key} not present in loaded params')
+                        jax.debug.print(
+                            f"Param {loaded_key} not present in loaded params"
+                        )
                         continue
                     loaded_param = jnp.array(loaded_params[loaded_key])
-                    assert param.dtype == loaded_param.dtype, f'Loaded param had dtype {loaded_param.dtype}, expected {param.dtype}'
+                    assert (
+                        param.dtype == loaded_param.dtype
+                    ), f"Loaded param had dtype {loaded_param.dtype}, expected {param.dtype}"
                     if param.shape != loaded_param.shape:
-                        jax.debug.print(f'Received parameter of shape {loaded_param.shape} when trying to load param for {k}, expected {param.shape}. Skipping.')
+                        jax.debug.print(
+                            f"Received parameter of shape {loaded_param.shape} when trying to load param for {k}, expected {param.shape}. Skipping."
+                        )
                         continue
                     flat_params[k] = loaded_param
-        
+
         params = flax.traverse_util.unflatten_dict(flat_params)
         params = jax.tree.map(lambda x: x.astype(param_dtype), params)
 
@@ -505,8 +510,6 @@ def load_from_pretrained(
 
     init_params = init_params_fn(base_params)
     return model_spec, init_params
-
-
 
 
 #####

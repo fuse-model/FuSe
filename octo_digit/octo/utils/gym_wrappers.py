@@ -9,7 +9,8 @@ import jax
 import numpy as np
 import tensorflow as tf
 
-#import librosa
+# import librosa
+
 
 def stack_and_pad(history: deque, num_obs: int):
     """
@@ -93,131 +94,146 @@ def add_octo_env_wrappers(
     return env
 
 
-# try: 
+# try:
 #     from tvl_enc import tacvis
-#     ON_TPUS = False 
-    
-# except ModuleNotFoundError: 
-#     ON_TPUS = True 
-# if not ON_TPUS: 
-#     from tvl_embedder import TVLEmbedder 
-#     import torch 
+#     ON_TPUS = False
+
+# except ModuleNotFoundError:
+#     ON_TPUS = True
+# if not ON_TPUS:
+#     from tvl_embedder import TVLEmbedder
+#     import torch
 ON_TPUS = True
 
-class ObsProcessingWrapper(gym.ObservationWrapper): 
-    def __init__(self, 
-        env: gym.Env, 
-        remap_keys: dict, 
-        new_fields: Sequence[str], 
-        flip_channels: bool = False, 
+
+class ObsProcessingWrapper(gym.ObservationWrapper):
+    def __init__(
+        self,
+        env: gym.Env,
+        remap_keys: dict,
+        new_fields: Sequence[str],
+        flip_channels: bool = False,
         do_background_subtraction: bool = True,
-        tvl_embedder = None 
-    ): 
+        tvl_embedder=None,
+    ):
         super().__init__(env)
+
         def flatten_dict(dic, separator="_"):
             flat = {}
-            for key, val in dic.items(): 
-                if isinstance(val, dict): 
-                    for sub_key, sub_val in val.items(): 
+            for key, val in dic.items():
+                if isinstance(val, dict):
+                    for sub_key, sub_val in val.items():
                         full_key = separator.join([key, sub_key])
                         flat[full_key] = sub_val
-                else: 
-                    flat[key] = val 
-            return flat 
-        self._remap_keys = flatten_dict(remap_keys) 
+                else:
+                    flat[key] = val
+            return flat
+
+        self._remap_keys = flatten_dict(remap_keys)
         self._new_fields = new_fields
 
-        # if "digit_embeddings" in self._new_fields: 
+        # if "digit_embeddings" in self._new_fields:
         #     self._setup_tvl_encoder()
         self._tvl_encoder = tvl_embedder
 
-        if "siglip" in self._new_fields: 
+        if "siglip" in self._new_fields:
             self._setup_siglip()
 
         self._do_background_subtraction = do_background_subtraction
         self._flip_channels = flip_channels
 
-
-    def _setup_tvl_encoder(self, tvl_device='cuda:0'): 
-        # if ON_TPUS: 
-        #     self._tvl_encoder = None 
-        # else: 
+    def _setup_tvl_encoder(self, tvl_device="cuda:0"):
+        # if ON_TPUS:
+        #     self._tvl_encoder = None
+        # else:
         #     self._tvl_encoder = TVLEmbedder(tvl_device)
         raise NotImplementedError
 
-        
-    def _setup_siglip(self): 
+    def _setup_siglip(self):
         raise NotImplementedError
 
-    def _remap_dict(self, old_dic): 
-        key_mappings = self._remap_keys 
-        new_dic = {} 
-        for new_key, old_key in key_mappings.items(): 
-            if old_key in old_dic: 
+    def _remap_dict(self, old_dic):
+        key_mappings = self._remap_keys
+        new_dic = {}
+        for new_key, old_key in key_mappings.items():
+            if old_key in old_dic:
                 new_dic[new_key] = old_dic[old_key]
-        return new_dic 
+        return new_dic
 
-    def observation(self, observation): 
-        # start = time.time() 
+    def observation(self, observation):
+        # start = time.time()
         processed_obs = self._remap_dict(observation)
-        if self._flip_channels: 
-            for key, val in processed_obs.items(): 
-                if key.startswith('image'): 
+        if self._flip_channels:
+            for key, val in processed_obs.items():
+                if key.startswith("image"):
                     processed_obs[key] = val[..., ::-1]
-    
-        for new_field in self._new_fields: 
-            if new_field == "spectro": # assume mel-spectro 
+
+        for new_field in self._new_fields:
+            if new_field == "spectro":  # assume mel-spectro
                 # MIC_SAMPLE_FREQ = 44100
-                # MIC_OBS_LENGTH = 0.3 
+                # MIC_OBS_LENGTH = 0.3
                 # NFFT = 256
                 # HOP_LENGTH = 128
                 # MEL_HOP_LENGTH = 104 # selected to make mel_spectrogram have dimension 128x128
                 # N_MELS = 128
-                # start_mic = time.time() 
+                # start_mic = time.time()
                 # mic_data = observation['mic']
                 # spectrogram_nonfft = np.abs(librosa.stft(mic_data, hop_length=MEL_HOP_LENGTH))
                 # mel_spectro = librosa.feature.melspectrogram(S=spectrogram_nonfft**2, sr=MIC_SAMPLE_FREQ, n_mels=128)
                 # mel_spectro = librosa.power_to_db(mel_spectro)
-                
+
                 # # processed_obs['spectro'] = observation['mel_spectro']
                 # processed_obs['spectro'] = mel_spectro
-                # end_mic = time.time() 
-                # if VERBOSE: 
+                # end_mic = time.time()
+                # if VERBOSE:
                 #     print('DELTA MIC    ', end_mic - start_mic)
-                pass 
+                pass
 
-            elif new_field == "digit_embeddings": 
+            elif new_field == "digit_embeddings":
                 tvl_obs_dict = {
-                    "digit_left": processed_obs["image_digit_left"], 
-                    "background_l": observation["background_l"], 
-                    "digit_right": processed_obs["image_digit_right"], 
-                    "background_r": observation["background_r"], 
+                    "digit_left": processed_obs["image_digit_left"],
+                    "background_l": observation["background_l"],
+                    "digit_right": processed_obs["image_digit_right"],
+                    "background_r": observation["background_r"],
                 }
                 # shape: 2 x (embdim = 768)
-                digit_embeddings = self._tvl_encoder.get_embeddings(tvl_obs_dict)['digit_embeddings'].cpu().detach().numpy() 
+                digit_embeddings = (
+                    self._tvl_encoder.get_embeddings(tvl_obs_dict)["digit_embeddings"]
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
 
                 digit_0_embedding, digit_1_embedding = digit_embeddings
                 processed_obs["digit_left_embedding"] = digit_0_embedding
                 processed_obs["digit_right_embedding"] = digit_1_embedding
 
-            elif new_field == "siglip": 
+            elif new_field == "siglip":
                 raise NotImplementedError
 
-            else: 
-                raise ValueError('Unsupported new field')
+            else:
+                raise ValueError("Unsupported new field")
 
-        if self._do_background_subtraction and "image_digit_left" in processed_obs: 
-            dig_l, dig_r = processed_obs['image_digit_left'], processed_obs['image_digit_right']
-            back_l, back_r = processed_obs['image_digit_left_background'], processed_obs['image_digit_right_background']
-            processed_obs["image_digit_left"] = np.array(dig_l, dtype=np.int16) - np.array(back_l, dtype=np.int16)
-            processed_obs["image_digit_right"] = np.array(dig_r, dtype=np.int16) - np.array(back_r, dtype=np.int16)
-        
-
+        if self._do_background_subtraction and "image_digit_left" in processed_obs:
+            dig_l, dig_r = (
+                processed_obs["image_digit_left"],
+                processed_obs["image_digit_right"],
+            )
+            back_l, back_r = (
+                processed_obs["image_digit_left_background"],
+                processed_obs["image_digit_right_background"],
+            )
+            processed_obs["image_digit_left"] = np.array(
+                dig_l, dtype=np.int16
+            ) - np.array(back_l, dtype=np.int16)
+            processed_obs["image_digit_right"] = np.array(
+                dig_r, dtype=np.int16
+            ) - np.array(back_r, dtype=np.int16)
 
         # TEMP
         processed_obs["imu"] = np.zeros((15, 3)).flatten()
-        # end  = time.time() 
-        # if VERBOSE: 
+        # end  = time.time()
+        # if VERBOSE:
         #     print('OBS_PROCESSING_WRAPPER',  end-start)
 
         return processed_obs
@@ -344,8 +360,8 @@ class ResizeImageWrapperDict(gym.ObservationWrapper):
         resize_size: dict,
     ):
         super().__init__(env)
-        self.keys_to_resize = resize_size # name to size 
-    
+        self.keys_to_resize = resize_size  # name to size
+
     def observation(self, observation):
         for k, size in self.keys_to_resize.items():
             image = tf.image.resize(
@@ -354,6 +370,7 @@ class ResizeImageWrapperDict(gym.ObservationWrapper):
             image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8).numpy()
             observation[k] = image
         return observation
+
 
 class ResizeImageWrapper(gym.ObservationWrapper):
     def __init__(
@@ -439,4 +456,3 @@ class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
         else:
             assert "proprio" not in obs, "Cannot normalize proprio without metadata."
         return obs
-

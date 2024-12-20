@@ -1,6 +1,5 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
-
 from octo.utils.spec import ModuleSpec
 
 

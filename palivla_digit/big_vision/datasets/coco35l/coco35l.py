@@ -74,81 +74,115 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 
-_CAPTIONS_PATH = '/tmp/data/coco35l'
-_IMAGES_PATH = '/tmp/data/mscoco/images'
-_COCOCAPS_PATH = '/tmp/data/mscoco/dataset_coco.json'
+_CAPTIONS_PATH = "/tmp/data/coco35l"
+_IMAGES_PATH = "/tmp/data/mscoco/images"
+_COCOCAPS_PATH = "/tmp/data/mscoco/dataset_coco.json"
 
 LANGUAGES = [
-    'ar', 'bn', 'cs', 'da', 'de', 'el', 'en', 'es', 'fa', 'fi', 'fil', 'fr',
-    'he', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'mi', 'nl', 'no', 'pl',
-    'pt', 'ro', 'ru', 'sv', 'sw', 'te', 'th', 'tr', 'uk', 'vi', 'zh',
+    "ar",
+    "bn",
+    "cs",
+    "da",
+    "de",
+    "el",
+    "en",
+    "es",
+    "fa",
+    "fi",
+    "fil",
+    "fr",
+    "he",
+    "hi",
+    "hr",
+    "hu",
+    "id",
+    "it",
+    "ja",
+    "ko",
+    "mi",
+    "nl",
+    "no",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sv",
+    "sw",
+    "te",
+    "th",
+    "tr",
+    "uk",
+    "vi",
+    "zh",
 ]
 
 
 class Coco35l(tfds.core.GeneratorBasedBuilder):
-  """DatasetBuilder for COCO-35L dataset."""
+    """DatasetBuilder for COCO-35L dataset."""
 
-  VERSION = tfds.core.Version('1.0.0')
-  RELEASE_NOTES = {'1.0.0': 'First release.'}
+    VERSION = tfds.core.Version("1.0.0")
+    RELEASE_NOTES = {"1.0.0": "First release."}
 
-  def _info(self):
-    """Returns the metadata."""
+    def _info(self):
+        """Returns the metadata."""
 
-    return tfds.core.DatasetInfo(
-        builder=self,
-        description=_DESCRIPTION,
-        features=tfds.features.FeaturesDict({
-            'image/id': tfds.features.Text(),
-            'image': tfds.features.Image(encoding_format='jpeg'),
-            'captions': tfds.features.Sequence(tfds.features.Text()),
-            'language': tfds.features.Text(),
-        }),
-        supervised_keys=None,
-        homepage='https://google.github.io/crossmodal-3600/',
-        citation=_CITATION,
-    )
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict(
+                {
+                    "image/id": tfds.features.Text(),
+                    "image": tfds.features.Image(encoding_format="jpeg"),
+                    "captions": tfds.features.Sequence(tfds.features.Text()),
+                    "language": tfds.features.Text(),
+                }
+            ),
+            supervised_keys=None,
+            homepage="https://google.github.io/crossmodal-3600/",
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Returns SplitGenerators."""
-    splits = []
-    for lang in LANGUAGES:
-      splits.extend([f'train_{lang}', f'dev_{lang}'])
-    return {split: self._generate_examples(split) for split in splits}
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Returns SplitGenerators."""
+        splits = []
+        for lang in LANGUAGES:
+            splits.extend([f"train_{lang}", f"dev_{lang}"])
+        return {split: self._generate_examples(split) for split in splits}
 
-  def _generate_examples(self, split: str):
-    """Yields (key, example) tuples from dataset."""
-    split, language = split.split('_')
+    def _generate_examples(self, split: str):
+        """Yields (key, example) tuples from dataset."""
+        split, language = split.split("_")
 
-    id_to_path = dict()
-    with open(_COCOCAPS_PATH, 'r') as f:
-      data = json.load(f)['images']
-    for d in data:
-      id_to_path[d['cocoid']] = os.path.join(
-          _IMAGES_PATH, d['filepath'], d['filename']
-      )
+        id_to_path = dict()
+        with open(_COCOCAPS_PATH, "r") as f:
+            data = json.load(f)["images"]
+        for d in data:
+            id_to_path[d["cocoid"]] = os.path.join(
+                _IMAGES_PATH, d["filepath"], d["filename"]
+            )
 
-    annot_fname = os.path.join(_CAPTIONS_PATH, f'coco_mt_{split}.jsonl')
-    data = {}
-    with open(annot_fname, 'r') as f:
-      for line in f:
-        j = json.loads(line)
-        image_id = f'{j["image_id"].split("_")[0]}_{language}'
-        if image_id not in data:
-          data[image_id] = []
-        if language == 'en':
-          # COCO-35L was constructed from English into 35 other languages.
-          # To add English in our TFDS, we just select a language (eg. "de") to
-          # have each unique example, and add the corresponding source caption.
-          if j['trg_lang'] == 'de':
-            data[image_id].append(j['caption_tokenized'])
-        else:
-          if j['trg_lang'] == language:
-            data[image_id].append(j['translation_tokenized'])
+        annot_fname = os.path.join(_CAPTIONS_PATH, f"coco_mt_{split}.jsonl")
+        data = {}
+        with open(annot_fname, "r") as f:
+            for line in f:
+                j = json.loads(line)
+                image_id = f'{j["image_id"].split("_")[0]}_{language}'
+                if image_id not in data:
+                    data[image_id] = []
+                if language == "en":
+                    # COCO-35L was constructed from English into 35 other languages.
+                    # To add English in our TFDS, we just select a language (eg. "de") to
+                    # have each unique example, and add the corresponding source caption.
+                    if j["trg_lang"] == "de":
+                        data[image_id].append(j["caption_tokenized"])
+                else:
+                    if j["trg_lang"] == language:
+                        data[image_id].append(j["translation_tokenized"])
 
-    for image_id, captions in data.items():
-      yield image_id, {
-          'image/id': image_id,
-          'image': id_to_path[int(image_id.split('_')[0])],
-          'captions': captions,
-          'language': language,
-      }
+        for image_id, captions in data.items():
+            yield image_id, {
+                "image/id": image_id,
+                "image": id_to_path[int(image_id.split("_")[0])],
+                "captions": captions,
+                "language": language,
+            }

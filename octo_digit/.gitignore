@@ -180,6 +180,6 @@ octo/utils/gradcam.ipynb
 octo/utils/test-gradcam.ipynb
 examples/viz_vid.mp4
 siglip.npz
-ResNet26_log.txt 
+ResNet26_log.txt
 s32.bash
 r26.bash

@@ -61,4 +61,3 @@ POD_NAME=$TPU_VM_NAME tpc launch pod_config.py
 
 # Connect to the pod
 bash ssh_pod.sh $TPU_VM_NAME
-

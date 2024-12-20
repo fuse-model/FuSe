@@ -1,15 +1,10 @@
-from PIL import Image
+import pdb
 
 from absl import app, flags, logging
 import flax
 import jax
-import optax
-import tensorflow as tf
-import tqdm
-import pdb
-# import wandb
-
 from octo.data.dataset import make_single_dataset
+
 # from octo.data.utils.data_utils import NormalizationType
 from octo.model.components.action_heads import L1ActionHead
 from octo.model.components.tokenizers import LowdimObsTokenizer
@@ -22,6 +17,13 @@ from octo.utils.train_utils import (
     process_text,
     TrainState,
 )
+import optax
+from PIL import Image
+import tensorflow as tf
+import tqdm
+
+# import wandb
+
 
 FLAGS = flags.FLAGS
 
@@ -42,7 +44,7 @@ def main(_):
     # setup wandb for logging
     # wandb.init(name="finetune_octo_test", project="octo")
 
-    # load pre-trained model 
+    # load pre-trained model
     print("\n\n\nhere1\n\n\n")
     # breakpoint()
     dataset = make_single_dataset(
@@ -54,11 +56,19 @@ def main(_):
             language_key="language_instruction",
             # action_proprio_normalization_type=NormalizationType.NORMAL,
             # absolute_action_mask=[False, False, False, False, False, False, True],
-            action_normalization_mask = [True, True, True, True, True, True, False] # Add normalization mask
+            action_normalization_mask=[
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                False,
+            ],  # Add normalization mask
         ),
         traj_transform_kwargs=dict(
             window_size=2,
-            future_action_window_size=3, 
+            future_action_window_size=3,
         ),
         frame_transform_kwargs=dict(
             resize_size={"primary": (256, 256)},
@@ -77,22 +87,21 @@ def main(_):
     j = -1
     batch = next(train_data_iter)
     print(batch)
-    # while True: 
+    # while True:
     #     j += 1
     #     batch = next(train_data_iter)
     #     img_obs = batch['observation']['image_primary']
-    #     if not img_obs.any(): 
+    #     if not img_obs.any():
     #         print(j)
     #         print(img_obs)
-    #         continue 
+    #         continue
     #     print("success:   ", j)
-    #     for k1 in range(img_obs.shape[0]): 
-    #         for k2 in range(img_obs.shape[1]): 
+    #     for k1 in range(img_obs.shape[0]):
+    #         for k2 in range(img_obs.shape[1]):
     #             img_test = img_obs[k1, k2, ...]
-    #             if img_test.any(): 
+    #             if img_test.any():
     #                 im = Image.fromarray(img_test)
     #                 im.save(f"./test_img_{j}_{k1}_{k2}.jpeg")
-
 
 
 if __name__ == "__main__":

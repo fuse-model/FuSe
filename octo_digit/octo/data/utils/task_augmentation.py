@@ -4,9 +4,8 @@ Contains basic logic for randomly zero-ing out keys in the task specification.
 
 import pickle
 
-import tensorflow as tf
-
 from octo.data.utils.data_utils import to_padding
+import tensorflow as tf
 
 
 def delete_and_rephrase(

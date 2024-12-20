@@ -1,20 +1,20 @@
 from collections import deque
 from concurrent.futures import process
 import logging
+import os
+import time
 from typing import Optional, Sequence, Tuple, Union
 
+from eval.eval_config import VERBOSE
 import gym
 import gym.spaces
 import jax
+import librosa
+from multimodalMAE.mae import MAE
+from multimodalMAE.vit import ViT
 import numpy as np
 import tensorflow as tf
 
-import librosa
-import time 
-import os 
-from eval.eval_config import VERBOSE
-from multimodalMAE.vit import ViT
-from multimodalMAE.mae import MAE
 
 def stack_and_pad(history: deque, num_obs: int):
     """
@@ -98,83 +98,90 @@ def add_octo_env_wrappers(
     return env
 
 
-try: 
+try:
     from tvl_enc import tacvis
-    ON_TPUS = False 
-    
-except ModuleNotFoundError: 
-    ON_TPUS = True 
-if not ON_TPUS: 
-    from tvl_embedder import TVLEmbedder 
-    import torch 
 
-class ObsProcessingWrapper(gym.ObservationWrapper): 
-    def __init__(self, 
-        env: gym.Env, 
-        remap_keys: dict, 
-        new_fields: Sequence[str], 
-        flip_channels: bool = False, 
+    ON_TPUS = False
+
+except ModuleNotFoundError:
+    ON_TPUS = True
+if not ON_TPUS:
+    import torch
+    from tvl_embedder import TVLEmbedder
+
+
+class ObsProcessingWrapper(gym.ObservationWrapper):
+    def __init__(
+        self,
+        env: gym.Env,
+        remap_keys: dict,
+        new_fields: Sequence[str],
+        flip_channels: bool = False,
         do_background_subtraction: bool = True,
         tvl_embedder: TVLEmbedder = None,
-    ): 
+    ):
         super().__init__(env)
+
         def flatten_dict(dic, separator="_"):
             flat = {}
-            for key, val in dic.items(): 
-                if isinstance(val, dict): 
-                    for sub_key, sub_val in val.items(): 
+            for key, val in dic.items():
+                if isinstance(val, dict):
+                    for sub_key, sub_val in val.items():
                         full_key = separator.join([key, sub_key])
                         flat[full_key] = sub_val
-                else: 
-                    flat[key] = val 
-            return flat 
-        self._remap_keys = flatten_dict(remap_keys) 
+                else:
+                    flat[key] = val
+            return flat
+
+        self._remap_keys = flatten_dict(remap_keys)
         self._new_fields = new_fields
-       
-        # if "digit_embeddings" in self._new_fields: 
+
+        # if "digit_embeddings" in self._new_fields:
         #     self._setup_tvl_encoder()
         self._tvl_encoder = tvl_embedder
 
-        if "siglip" in self._new_fields: 
+        if "siglip" in self._new_fields:
             self._setup_siglip()
 
         self._do_background_subtraction = do_background_subtraction
         self._flip_channels = flip_channels
         self.dev = 0
-        embed_mae = False 
+        embed_mae = False
         for field in new_fields:
-            if field.startswith('mae'):
+            if field.startswith("mae"):
                 embed_mae = True
-                break 
-        if embed_mae: 
+                break
+        if embed_mae:
             self._setup_mae()
-    
+
     def _setup_mae(self):
         v = ViT(
-            image_size = 256,
-            tactile_size = 128,
-            image_patch_size = 32,
-            tactile_patch_size = 16,
-            num_classes = 1000,
-            dim = 1024,
-            depth = 6,
-            heads = 8,
-            mlp_dim = 2048,
-            pool = 'mean',
+            image_size=256,
+            tactile_size=128,
+            image_patch_size=32,
+            tactile_patch_size=16,
+            num_classes=1000,
+            dim=1024,
+            depth=6,
+            heads=8,
+            mlp_dim=2048,
+            pool="mean",
             image_channels=6,
-            tactile_channels=6
+            tactile_channels=6,
         )
         self.mae_uniform = MAE(
-            encoder = v,
-            masking_image = 0.85,   # the paper recommended 75% masked patches
-            masking_tactile = 0.85, # the paper recommended 75% masked patches
-            decoder_dim = 512,      # paper showed good results with just 512
-            decoder_depth = 6,       # anywhere from 1 to 8
-            masking_type='uniform'       # uniform or asymmetric or modality
+            encoder=v,
+            masking_image=0.85,  # the paper recommended 75% masked patches
+            masking_tactile=0.85,  # the paper recommended 75% masked patches
+            decoder_dim=512,  # paper showed good results with just 512
+            decoder_depth=6,  # anywhere from 1 to 8
+            masking_type="uniform",  # uniform or asymmetric or modality
         )
-        self.mae_uniform.load_state_dict(torch.load(f'/home/josh/multiMAE/multimodalMAE/uniform_95.pth'))
+        self.mae_uniform.load_state_dict(
+            torch.load(f"/home/josh/multiMAE/multimodalMAE/uniform_95.pth")
+        )
         self.mae_uniform.cuda(self.dev)
-        
+
         # self.mae_asym = MAE(
         #     encoder = v,
         #     masking_image = 0.85,   # the paper recommended 75% masked patches
@@ -185,83 +192,99 @@ class ObsProcessingWrapper(gym.ObservationWrapper):
         # )
         # self.mae_asym.load_state_dict(torch.load(f'/home/josh/multiMAE/multimodalMAE/asymmetric_25.pth'))
         # self.mae_asym.cuda(self.dev)
-        
-        
-        
-    
 
-    def _setup_tvl_encoder(self, tvl_device='cuda:0'): 
-        # if ON_TPUS: 
-        #     self._tvl_encoder = None 
-        # else: 
+    def _setup_tvl_encoder(self, tvl_device="cuda:0"):
+        # if ON_TPUS:
+        #     self._tvl_encoder = None
+        # else:
         #     self._tvl_encoder = TVLEmbedder(tvl_device)
         raise NotImplementedError
 
-        
-    def _setup_siglip(self): 
+    def _setup_siglip(self):
         raise NotImplementedError
 
-    def _remap_dict(self, old_dic): 
-        key_mappings = self._remap_keys 
-        new_dic = {} 
-        for new_key, old_key in key_mappings.items(): 
-            if old_key in old_dic: 
+    def _remap_dict(self, old_dic):
+        key_mappings = self._remap_keys
+        new_dic = {}
+        for new_key, old_key in key_mappings.items():
+            if old_key in old_dic:
                 new_dic[new_key] = old_dic[old_key]
-        return new_dic 
+        return new_dic
 
-    def observation(self, observation): 
-        start = time.time() 
-        if 'xyz' in observation:
-            xyz = observation['xyz']
+    def observation(self, observation):
+        start = time.time()
+        if "xyz" in observation:
+            xyz = observation["xyz"]
         else:
             xyz = 0
         processed_obs = self._remap_dict(observation)
-        if self._flip_channels: 
-            for key, val in processed_obs.items(): 
-                if key.startswith('image'): 
+        if self._flip_channels:
+            for key, val in processed_obs.items():
+                if key.startswith("image"):
                     processed_obs[key] = val[..., ::-1]
 
-        if self._do_background_subtraction and "image_digit_left" in processed_obs: 
-            dig_l, dig_r = processed_obs['image_digit_left'], processed_obs['image_digit_right']
-            processed_obs['dig_left'] = dig_l
-            processed_obs['dig_right'] = dig_r
-            back_l, back_r = processed_obs['image_digit_left_background'], processed_obs['image_digit_right_background']
-            processed_obs["image_digit_left"] = np.array(dig_l, dtype=np.int16) - np.array(back_l, dtype=np.int16)
-            processed_obs["image_digit_right"] = np.array(dig_r, dtype=np.int16) - np.array(back_r, dtype=np.int16)
-    
-        for new_field in self._new_fields: 
-            if new_field == "spectro": # assume mel-spectro 
+        if self._do_background_subtraction and "image_digit_left" in processed_obs:
+            dig_l, dig_r = (
+                processed_obs["image_digit_left"],
+                processed_obs["image_digit_right"],
+            )
+            processed_obs["dig_left"] = dig_l
+            processed_obs["dig_right"] = dig_r
+            back_l, back_r = (
+                processed_obs["image_digit_left_background"],
+                processed_obs["image_digit_right_background"],
+            )
+            processed_obs["image_digit_left"] = np.array(
+                dig_l, dtype=np.int16
+            ) - np.array(back_l, dtype=np.int16)
+            processed_obs["image_digit_right"] = np.array(
+                dig_r, dtype=np.int16
+            ) - np.array(back_r, dtype=np.int16)
+
+        for new_field in self._new_fields:
+            if new_field == "spectro":  # assume mel-spectro
                 MIC_SAMPLE_FREQ = 44100
-                MEL_HOP_LENGTH = 104 # selected to make mel_spectrogram have dimension 128x128
+                MEL_HOP_LENGTH = (
+                    104  # selected to make mel_spectrogram have dimension 128x128
+                )
                 N_MELS = 128
                 MEL_HOP_LENGTH = 347
-                start_mic = time.time() 
-                mic_data = observation['mic']
-                spectrogram_nonfft = np.abs(librosa.stft(mic_data, hop_length=MEL_HOP_LENGTH))
-                mel_spectro = librosa.feature.melspectrogram(S=spectrogram_nonfft**2, sr=MIC_SAMPLE_FREQ, n_mels=N_MELS)
+                start_mic = time.time()
+                mic_data = observation["mic"]
+                spectrogram_nonfft = np.abs(
+                    librosa.stft(mic_data, hop_length=MEL_HOP_LENGTH)
+                )
+                mel_spectro = librosa.feature.melspectrogram(
+                    S=spectrogram_nonfft**2, sr=MIC_SAMPLE_FREQ, n_mels=N_MELS
+                )
                 mel_spectro = librosa.power_to_db(mel_spectro)
-                
-                # processed_obs['spectro'] = observation['mel_spectro']
-                processed_obs['mel_spectro'] = mel_spectro
-                end_mic = time.time() 
-                if VERBOSE: 
-                    print('DELTA MIC    ', end_mic - start_mic)
 
-            elif new_field == "digit_embeddings": 
+                # processed_obs['spectro'] = observation['mel_spectro']
+                processed_obs["mel_spectro"] = mel_spectro
+                end_mic = time.time()
+                if VERBOSE:
+                    print("DELTA MIC    ", end_mic - start_mic)
+
+            elif new_field == "digit_embeddings":
                 raise NotImplementedError
                 tvl_obs_dict = {
-                    "digit_left": processed_obs["image_digit_left"], 
-                    "background_l": observation["background_l"], 
-                    "digit_right": processed_obs["image_digit_right"], 
-                    "background_r": observation["background_r"], 
+                    "digit_left": processed_obs["image_digit_left"],
+                    "background_l": observation["background_l"],
+                    "digit_right": processed_obs["image_digit_right"],
+                    "background_r": observation["background_r"],
                 }
                 # shape: 2 x (embdim = 768)
-                digit_embeddings = self._tvl_encoder.get_embeddings(tvl_obs_dict)['digit_embeddings'].cpu().detach().numpy() 
+                digit_embeddings = (
+                    self._tvl_encoder.get_embeddings(tvl_obs_dict)["digit_embeddings"]
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
 
                 digit_0_embedding, digit_1_embedding = digit_embeddings
                 processed_obs["digit_left_embedding"] = digit_0_embedding
                 processed_obs["digit_right_embedding"] = digit_1_embedding
-            
+
             # elif new_field.startswith('mae'):
             #     def to_torch_style(image_0, image_1):
             #         combined = torch.cat([image_0, image_1], dim=-1)
@@ -269,7 +292,7 @@ class ObsProcessingWrapper(gym.ObservationWrapper):
             #         combined = combined.float() / 255.0
             #         combined = combined.cuda(self.dev)
             #         return combined
-                
+
             #     tac_left, tac_right = processed_obs['image_digit_left'], processed_obs['image_digit_right']
             #     tac_left = torch.from_numpy(tac_left[None, ...])
             #     tac_right = torch.from_numpy(tac_right[None, ...])
@@ -281,59 +304,64 @@ class ObsProcessingWrapper(gym.ObservationWrapper):
             #         wrist = torch.from_numpy(processed_obs['image_wrist'][None, ...])
             #         image = to_torch_style(primary, wrist)
             #         obs['image'] = image
-            
+
             #     with torch.no_grad():
             #         encoder = self.mae_asym
             #         embedding, _ = encoder.encode(obs, test=True)
             #         embedding = embedding.mean(dim=1)
             #         embedding = embedding[0].detach().cpu().numpy()
             #         processed_obs[f'asym{tac_suffix}'] = embedding
-                    
+
             #         encoder = self.mae_uniform
             #         embedding, _ = encoder.encode(obs, test=True)
             #         embedding = embedding.mean(dim=1)
             #         embedding = embedding[0].detach().cpu().numpy()
-            #         processed_obs[f'uniform{tac_suffix}'] = embedding    
-            elif new_field == 'mae_tac_uniform':
+            #         processed_obs[f'uniform{tac_suffix}'] = embedding
+            elif new_field == "mae_tac_uniform":
+
                 def to_torch_style(image_0, image_1):
                     combined = torch.cat([image_0, image_1], dim=-1)
                     combined = combined.permute(0, 3, 1, 2)
                     combined = combined.float() / 255.0
                     combined = combined.cuda(self.dev)
                     return combined
-                
-                tac_left, tac_right = processed_obs['image_digit_left'], processed_obs['image_digit_right']
-                
+
+                tac_left, tac_right = (
+                    processed_obs["image_digit_left"],
+                    processed_obs["image_digit_right"],
+                )
+
                 tac_left = torch.from_numpy(tac_left[None, ...])
                 tac_right = torch.from_numpy(tac_right[None, ...])
                 tac = to_torch_style(tac_left, tac_right)
-                obs = {'tactile': tac}
-        
-            
+                obs = {"tactile": tac}
+
                 with torch.no_grad():
                     encoder = self.mae_uniform
                     embedding, _ = encoder.encode(obs, test=True)
                     embedding = embedding.mean(dim=1)
                     embedding = embedding[0].detach().cpu().numpy()
-                    processed_obs[f'uniform_tac'] = embedding    
-                for key in ['image_digit_left', 'image_digit_right', 'image_digit_left_background', 'image_digit_right_background']:
+                    processed_obs[f"uniform_tac"] = embedding
+                for key in [
+                    "image_digit_left",
+                    "image_digit_right",
+                    "image_digit_left_background",
+                    "image_digit_right_background",
+                ]:
                     processed_obs.pop(key)
 
-            elif new_field == "siglip": 
+            elif new_field == "siglip":
                 raise NotImplementedError
 
-            else: 
-                raise ValueError('Unsupported new field')
-
-        
-
+            else:
+                raise ValueError("Unsupported new field")
 
         # TEMP
         processed_obs["imu"] = np.zeros((15, 3)).flatten()
-        processed_obs['xyz'] = xyz
-        end  = time.time() 
-        if VERBOSE: 
-            print('OBS_PROCESSING_WRAPPER',  end-start)
+        processed_obs["xyz"] = xyz
+        end = time.time()
+        if VERBOSE:
+            print("OBS_PROCESSING_WRAPPER", end - start)
         return processed_obs
 
 
@@ -458,29 +486,30 @@ class ResizeImageWrapperDict(gym.ObservationWrapper):
         resize_size: dict,
     ):
         super().__init__(env)
-        self.keys_to_resize = resize_size # name to size 
-    
+        self.keys_to_resize = resize_size  # name to size
+
     def observation(self, observation):
         # print("In resizer")
         # print(self.keys_to_resize)
         # print(observation.keys())
-        # for k, v in observation.items(): 
-        #     try: 
+        # for k, v in observation.items():
+        #     try:
         #         print(k, v.shape)
-        #     except AttributeError: 
-        #         pass 
+        #     except AttributeError:
+        #         pass
         for k, size in self.keys_to_resize.items():
             image = tf.image.resize(
                 observation[k], size=size, method="lanczos3", antialias=True
             )
             image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8).numpy()
             observation[k] = image
-        # for k, v in observation.items(): 
-        #     try: 
+        # for k, v in observation.items():
+        #     try:
         #         print(k, v.shape)
-        #     except AttributeError: 
-        #         pass 
+        #     except AttributeError:
+        #         pass
         return observation
+
 
 class ResizeImageWrapper(gym.ObservationWrapper):
     def __init__(

@@ -9,44 +9,48 @@ Encoders more suitable for ViT architectures.
 import functools as ft
 from typing import Callable, Sequence, TypeVar
 
+from einops import rearrange
 from flax import linen as nn
 import jax.numpy as jnp
-
 from octo.model.components.film_conditioning_layer import FilmConditioning
-from einops import rearrange
 
 T = TypeVar("T")
 
 precomputed_stats = {
-    'imagenet': {
-        'mean': jnp.array([0.485, 0.456, 0.406]), 
-        'std': jnp.array([0.229, 0.224, 0.225]),
+    "imagenet": {
+        "mean": jnp.array([0.485, 0.456, 0.406]),
+        "std": jnp.array([0.229, 0.224, 0.225]),
     },
-    'digit_bgs': {
-        'mean': jnp.array([-0.0005905 , -0.00049817, -0.00018213]), 
-        'std': jnp.array([0.02178901, 0.01295662, 0.01864144]),
+    "digit_bgs": {
+        "mean": jnp.array([-0.0005905, -0.00049817, -0.00018213]),
+        "std": jnp.array([0.02178901, 0.01295662, 0.01864144]),
     },
-    'digit_bgs_tvl': {
-        'mean': jnp.array([-0.00809318389762342, -0.01887447008747725, -0.018430588238856332]), 
-        'std': jnp.array([0.04535400223885517, 0.044029170444552575, 0.05332520729596308]),
-    }
+    "digit_bgs_tvl": {
+        "mean": jnp.array(
+            [-0.00809318389762342, -0.01887447008747725, -0.018430588238856332]
+        ),
+        "std": jnp.array(
+            [0.04535400223885517, 0.044029170444552575, 0.05332520729596308]
+        ),
+    },
 }
+
 
 def normalize_images(img, img_norm_type="default"):
     if img_norm_type == "default":
         # put pixels in [-1, 1]
         return img.astype(jnp.float32) / 127.5 - 1.0
-    elif img_norm_type == 'digit_bgs_clip': 
+    elif img_norm_type == "digit_bgs_clip":
         return img.astype(jnp.float32) / 255.0
-    
+
     elif img_norm_type in precomputed_stats:
         # put pixels in [0,1]
         img = img.astype(jnp.float32) / 255
         assert img.shape[-1] % 3 == 0, "images should have rgb channels!"
 
         # define pixel-wise mean/std stats calculated from ImageNet
-        mean = precomputed_stats[img_norm_type]['mean'].reshape((1, 1, 1, 3))
-        std = precomputed_stats[img_norm_type]['std'].reshape((1, 1, 1, 3))
+        mean = precomputed_stats[img_norm_type]["mean"].reshape((1, 1, 1, 3))
+        std = precomputed_stats[img_norm_type]["std"].reshape((1, 1, 1, 3))
 
         # tile mean and std (to account for stacked early_fusion images)
         num_tile = (1, 1, 1, int(img.shape[-1] / 3))
@@ -55,7 +59,7 @@ def normalize_images(img, img_norm_type="default"):
 
         # tile the mean/std, normalize image, and return
         return (img - mean_tile) / std_tile
-        
+
     raise ValueError()
 
 
@@ -284,13 +288,11 @@ class ViTResnet(nn.Module):
             if self.use_film:
                 assert cond_var is not None, "Cond var is None, nothing to condition on"
                 x = FilmConditioning()(x, cond_var)
-        
+
         if self.num_classes is not None:
             x = nn.Dense(self.num_classes)(x)
         if self.flatten_result:
-            x = rearrange(
-                x, "... h w d -> ... (h w) d"
-            )
+            x = rearrange(x, "... h w d -> ... (h w) d")
         return x
 
 
@@ -306,8 +308,10 @@ class ResNet26FILM(ViTResnet):
     use_film: bool = True
     num_layers: tuple = (2, 2, 2, 2)
 
-class ResNet26(ViTResnet): 
+
+class ResNet26(ViTResnet):
     num_layers: tuple = (2, 2, 2, 2)
+
 
 vit_encoder_configs = {
     "patchify-32-film": ft.partial(

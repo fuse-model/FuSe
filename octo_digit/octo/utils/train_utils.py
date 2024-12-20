@@ -1,9 +1,13 @@
 from collections import defaultdict
 from contextlib import contextmanager
 from fnmatch import fnmatch
+from functools import reduce
+from itertools import chain
 import logging
+from operator import mul
+import re
 import time
-from typing import Callable, List, Optional, Iterable, Sequence
+from typing import Callable, Iterable, List, Optional, Sequence
 
 import flax
 from flax import struct
@@ -13,18 +17,12 @@ import jax.numpy as jnp
 from ml_collections import ConfigDict
 import numpy as np
 from octo.data.utils.data_utils import AnnotationSelectionManager
-import optax
-import tensorflow as tf
-
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.octo_model import OctoModel
 from octo.utils import jax_utils
 from octo.utils.typing import Config, Data, Params, PRNGKey
-from functools import reduce
-from operator import mul
-from itertools import chain
-from collections import defaultdict
-import re
+import optax
+import tensorflow as tf
 
 
 @struct.dataclass
@@ -425,6 +423,7 @@ def merge_params(target_params: Params, pretrained_params: Params) -> Params:
     target_params = flax.traverse_util.unflatten_dict(flat_target_params)
     return target_params
 
+
 def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
     """Encodes the language instruction inside the tasks for a batch.
 
@@ -440,118 +439,187 @@ def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
         )
     return batch
 
-def process_lang_list(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+
+def process_lang_list(
+    batch: Data,
+    text_processor: TextProcessor,
+    batch_size: int,
+    annotation_manager: AnnotationSelectionManager,
+) -> Data:
     # tokenize all commands
     batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
-    batched_annotations = [batch['task'][key][i] for i, key in enumerate(batched_annotation_keys)]
+    batched_annotations = [
+        batch["task"][key][i] for i, key in enumerate(batched_annotation_keys)
+    ]
     batch["task"]["language_instruction"] = text_processor.encode(
-            [s.decode('utf-8') for s in batched_annotations]
+        [s.decode("utf-8") for s in batched_annotations]
     )
-    batch['task']['null'] = text_processor.encode(['' for s in range(batch_size)])
-    batch['task']['pad_mask_dict']['language_instruction'] = batch['task']['pad_mask_dict'][batched_annotation_keys[0]].copy()
+    batch["task"]["null"] = text_processor.encode(["" for s in range(batch_size)])
+    batch["task"]["pad_mask_dict"]["language_instruction"] = batch["task"][
+        "pad_mask_dict"
+    ][batched_annotation_keys[0]].copy()
 
-    for key in annotation_manager.dataset_keys: 
-        if key in batch['task']: 
-            if key in annotation_manager.dataset_remove_keys: 
-                batch['task'].pop(key)
-            else: 
+    for key in annotation_manager.dataset_keys:
+        if key in batch["task"]:
+            if key in annotation_manager.dataset_remove_keys:
+                batch["task"].pop(key)
+            else:
                 batch["task"][key] = text_processor.encode(
-                [s.decode("utf-8") for s in batch["task"][key]]
-            )
-            
+                    [s.decode("utf-8") for s in batch["task"][key]]
+                )
+
     return batch
 
-def process_batched_rephrase(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
 
-    
+def process_batched_rephrase(
+    batch: Data,
+    text_processor: TextProcessor,
+    batch_size: int,
+    annotation_manager: AnnotationSelectionManager,
+) -> Data:
+
     new_task = {}
     aliases, keys = annotation_manager.choose_rephrase_keys(shape=(batch_size,))
-    batched_annotations = [batch['task'][key][i] for i, key in enumerate(keys)]
-    pad_mask_dict = {'language_instruction': jnp.array([batch['task']['pad_mask_dict'][key][i] for i, key in enumerate(keys)])}
-    new_task = {
-        'language_instruction': text_processor.encode(
-            [s.decode('utf-8') for s in batched_annotations]
-        ), 
-        'pad_mask_dict': pad_mask_dict
+    batched_annotations = [batch["task"][key][i] for i, key in enumerate(keys)]
+    pad_mask_dict = {
+        "language_instruction": jnp.array(
+            [batch["task"]["pad_mask_dict"][key][i] for i, key in enumerate(keys)]
+        )
     }
-    batch['task'] = new_task
+    new_task = {
+        "language_instruction": text_processor.encode(
+            [s.decode("utf-8") for s in batched_annotations]
+        ),
+        "pad_mask_dict": pad_mask_dict,
+    }
+    batch["task"] = new_task
     return batch
 
-def process_fully_batched_rephrase(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+
+def process_fully_batched_rephrase(
+    batch: Data,
+    text_processor: TextProcessor,
+    batch_size: int,
+    annotation_manager: AnnotationSelectionManager,
+) -> Data:
     should_rephrase = annotation_manager.should_rephrase(shape=(batch_size,))
     rephrase_indices = annotation_manager.choose_all_rephrase_keys(shape=(batch_size,))
-    
-    
+
     all_lang = {
-        f'all_lang_{i}': ['' for _ in range(batch_size)] for i in range(len(annotation_manager.dataset_keys)) if i != 1
-    } 
-    for i in range(batch_size): 
-        for annotation_idx in range(len(annotation_manager.dataset_keys)): 
-            if annotation_idx == 1: 
-                continue 
-            all_lang[f'all_lang_{annotation_idx}'][i] = batch['task'][f'rephrased_{annotation_idx}_{rephrase_indices[i][annotation_idx]}'][i] if should_rephrase[i] else batch['task'][f'target_all_lang_{annotation_idx}'][i]
-    
-    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
-    batched_annotations = [all_lang[key][i] for i, key in enumerate(batched_annotation_keys)]
-    all_lang['language_instruction'] = batched_annotations
-    new_task = {
-        k: text_processor.encode([s.decode('utf-8') for s in v]) for k, v in all_lang.items()
+        f"all_lang_{i}": ["" for _ in range(batch_size)]
+        for i in range(len(annotation_manager.dataset_keys))
+        if i != 1
     }
-    new_task['null'] = text_processor.encode(['' for s in range(batch_size)])
+    for i in range(batch_size):
+        for annotation_idx in range(len(annotation_manager.dataset_keys)):
+            if annotation_idx == 1:
+                continue
+            all_lang[f"all_lang_{annotation_idx}"][i] = (
+                batch["task"][
+                    f"rephrased_{annotation_idx}_{rephrase_indices[i][annotation_idx]}"
+                ][i]
+                if should_rephrase[i]
+                else batch["task"][f"target_all_lang_{annotation_idx}"][i]
+            )
+
+    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
+    batched_annotations = [
+        all_lang[key][i] for i, key in enumerate(batched_annotation_keys)
+    ]
+    all_lang["language_instruction"] = batched_annotations
+    new_task = {
+        k: text_processor.encode([s.decode("utf-8") for s in v])
+        for k, v in all_lang.items()
+    }
+    new_task["null"] = text_processor.encode(["" for s in range(batch_size)])
     pad = jnp.array([True for _ in range(batch_size)])
-    pad_mask_dict = {f'all_lang_{i}': pad for i in range(len(annotation_manager.dataset_keys)) if i != 1}
-    pad_mask_dict['language_instruction'] = pad
-    new_task['pad_mask_dict'] = pad_mask_dict
-    batch['task'] = new_task
+    pad_mask_dict = {
+        f"all_lang_{i}": pad
+        for i in range(len(annotation_manager.dataset_keys))
+        if i != 1
+    }
+    pad_mask_dict["language_instruction"] = pad
+    new_task["pad_mask_dict"] = pad_mask_dict
+    batch["task"] = new_task
     return batch
 
-def process_fully_batched_rephrase_targets(batch: Data, text_processor: TextProcessor, batch_size: int, annotation_manager: AnnotationSelectionManager) -> Data:
+
+def process_fully_batched_rephrase_targets(
+    batch: Data,
+    text_processor: TextProcessor,
+    batch_size: int,
+    annotation_manager: AnnotationSelectionManager,
+) -> Data:
     should_rephrase = annotation_manager.should_rephrase(shape=(batch_size,))
     rephrase_indices = annotation_manager.choose_all_rephrase_keys(shape=(batch_size,))
     all_lang = {
-        f'all_lang_{i}': ['' for _ in range(batch_size)] for i in range(len(annotation_manager.dataset_keys)) if i != 1
-    } 
-    for i in range(batch_size): 
-        for annotation_idx in range(len(annotation_manager.dataset_keys)): 
-            if annotation_idx == 1: 
-                continue 
-            all_lang[f'all_lang_{annotation_idx}'][i] = batch['task'][f'rephrased_{annotation_idx}_{rephrase_indices[i][annotation_idx]}'][i] if should_rephrase[i] else batch['task'][f'target_all_lang_{annotation_idx}'][i]
-    
-    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
-    batched_annotations = [all_lang[key][i] for i, key in enumerate(batched_annotation_keys)]
-    all_lang['language_instruction'] = batched_annotations
-    new_task = {
-        k: text_processor.encode([s.decode('utf-8') for s in v]) for k, v in all_lang.items()
+        f"all_lang_{i}": ["" for _ in range(batch_size)]
+        for i in range(len(annotation_manager.dataset_keys))
+        if i != 1
     }
-    new_task['null'] = text_processor.encode(['' for s in range(batch_size)])
+    for i in range(batch_size):
+        for annotation_idx in range(len(annotation_manager.dataset_keys)):
+            if annotation_idx == 1:
+                continue
+            all_lang[f"all_lang_{annotation_idx}"][i] = (
+                batch["task"][
+                    f"rephrased_{annotation_idx}_{rephrase_indices[i][annotation_idx]}"
+                ][i]
+                if should_rephrase[i]
+                else batch["task"][f"target_all_lang_{annotation_idx}"][i]
+            )
+
+    batched_annotation_keys = annotation_manager.choose_random_keys(shape=(batch_size,))
+    batched_annotations = [
+        all_lang[key][i] for i, key in enumerate(batched_annotation_keys)
+    ]
+    all_lang["language_instruction"] = batched_annotations
+    new_task = {
+        k: text_processor.encode([s.decode("utf-8") for s in v])
+        for k, v in all_lang.items()
+    }
+    new_task["null"] = text_processor.encode(["" for s in range(batch_size)])
     pad = jnp.array([True for _ in range(batch_size)])
-    pad_mask_dict = {f'all_lang_{i}': pad for i in range(len(annotation_manager.dataset_keys)) if i != 1}
-    pad_mask_dict['language_instruction'] = pad
-    new_task['pad_mask_dict'] = pad_mask_dict
-    
-    
-    for key in annotation_manager.dataset_keys: 
-        target_key = f'target_{key}'
-        if target_key in batch['task']: 
+    pad_mask_dict = {
+        f"all_lang_{i}": pad
+        for i in range(len(annotation_manager.dataset_keys))
+        if i != 1
+    }
+    pad_mask_dict["language_instruction"] = pad
+    new_task["pad_mask_dict"] = pad_mask_dict
+
+    for key in annotation_manager.dataset_keys:
+        target_key = f"target_{key}"
+        if target_key in batch["task"]:
             new_task[target_key] = text_processor.encode(
                 [s.decode("utf-8") for s in batch["task"][target_key]]
             )
-    batch['task'] = new_task
+    batch["task"] = new_task
     return batch
 
 
-
-def process_dropout_annotations(batch: Data, text_processor: TextProcessor, batch_size: int, keys: np.ndarray, probabilities: np.ndarray): 
+def process_dropout_annotations(
+    batch: Data,
+    text_processor: TextProcessor,
+    batch_size: int,
+    keys: np.ndarray,
+    probabilities: np.ndarray,
+):
     batched_annotation_keys = np.random.choice(keys, size=batch_size, p=probabilities)
-    batched_annotations = [batch['task'][key][i] for i, key in enumerate(batched_annotation_keys)]
+    batched_annotations = [
+        batch["task"][key][i] for i, key in enumerate(batched_annotation_keys)
+    ]
     batch["task"]["language_instruction"] = text_processor.encode(
-            [s.decode('utf-8') for s in batched_annotations]
+        [s.decode("utf-8") for s in batched_annotations]
     )
-    remove_keys = [key for key in batch['task'].keys() if key.startswith('annotation_')]
-    batch['task']['pad_mask_dict']['language_instruction'] = batch['task']['pad_mask_dict'][remove_keys[0]]
-    for key in remove_keys: 
-        batch['task'].pop(key, None)
+    remove_keys = [key for key in batch["task"].keys() if key.startswith("annotation_")]
+    batch["task"]["pad_mask_dict"]["language_instruction"] = batch["task"][
+        "pad_mask_dict"
+    ][remove_keys[0]]
+    for key in remove_keys:
+        batch["task"].pop(key, None)
     return batch
+
 
 def process_and_save_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
     """Encodes the language instruction inside the tasks for a batch, and also keeps original text instruction
@@ -563,7 +631,9 @@ def process_and_save_text(batch: Data, text_processor: Optional[TextProcessor]) 
     if text_processor is None:
         batch["task"].pop("language_instruction")
     else:
-        batch["task"]['natural_language_instruction'] = batch["task"]["language_instruction"]
+        batch["task"]["natural_language_instruction"] = batch["task"][
+            "language_instruction"
+        ]
         batch["task"]["language_instruction"] = text_processor.encode(
             [s.decode("utf-8") for s in batch["task"]["language_instruction"]]
         )
@@ -633,37 +703,41 @@ def siglip_weights_loader(
     logging.info("Loaded siglip encoder blocks")
     return updated_params
 
+
 def resnet_26_loader(
-    params, 
-    restore_path="gs://vit_models/augreg/R26_S_32-i21k-300ep-lr_0.001-aug_light1-wd_0.1-do_0.0-sd_0.0.npz", 
-    exclude_tokenizers=()
+    params,
+    restore_path="gs://vit_models/augreg/R26_S_32-i21k-300ep-lr_0.001-aug_light1-wd_0.1-do_0.0-sd_0.0.npz",
+    exclude_tokenizers=(),
 ):
     # load pre-trained resnet from: github.com/google-research/vision_transformer/
     with tf.io.gfile.GFile(restore_path, "rb") as f:
         resnet_params = np.load(f)
 
     resnet_params = {
-        tuple(k.split('/')): jnp.array(v)
+        tuple(k.split("/")): jnp.array(v)
         for k, v in resnet_params.items()
-        if k.startswith('block') or k.startswith('conv_root') or k.startswith('gn_root')
+        if k.startswith("block") or k.startswith("conv_root") or k.startswith("gn_root")
     }
 
     marked_keys = set()
     flat_params = flax.traverse_util.flatten_dict(params)
     for k in flat_params:
-        if len(k) < 3 or k[2] not in ('ResNet26FILM_0', 'ResNet26_0') or 'Film' in k[3]:
+        if len(k) < 3 or k[2] not in ("ResNet26FILM_0", "ResNet26_0") or "Film" in k[3]:
             continue
-        for exclude_key in exclude_tokenizers: 
-            if re.fullmatch(exclude_key, k[1]): 
-                print('Skipping   ', k)
+        for exclude_key in exclude_tokenizers:
+            if re.fullmatch(exclude_key, k[1]):
+                print("Skipping   ", k)
                 break
-        else: 
-            print('Using    ', k)
+        else:
+            print("Using    ", k)
             new_key = resnet_params[k[3:]]
-            if 'gn' in k[-2]:
+            if "gn" in k[-2]:
                 new_key = new_key.squeeze()
-            elif k[3] == 'conv_root':
-                assert flat_params[k].shape[2] % new_key.shape[2] == 0, (flat_params[k].shape, new_key.shape)
+            elif k[3] == "conv_root":
+                assert flat_params[k].shape[2] % new_key.shape[2] == 0, (
+                    flat_params[k].shape,
+                    new_key.shape,
+                )
                 conv_tile = int(flat_params[k].shape[2] // new_key.shape[2])
                 if conv_tile:
                     new_key = jnp.tile(new_key, (1, 1, conv_tile, 1))
@@ -681,76 +755,103 @@ def resnet_26_loader(
     updated_params = flax.traverse_util.unflatten_dict(flat_params)
     return updated_params
 
+
 def timm_vit_loader(
-    params, 
+    params,
     restore_path,
     vit_variant,
     verbose=False,
-    
-): 
-    with tf.io.gfile.GFile(restore_path, 'rb') as f:
+):
+    with tf.io.gfile.GFile(restore_path, "rb") as f:
         ckpt_dict = np.load(f, allow_pickle=False)
     keys, values = zip(*list(ckpt_dict.items()))
-    timm_flat_params = {tuple(k.split('|')): v for k, v in zip(keys, values)}
+    timm_flat_params = {tuple(k.split("|")): v for k, v in zip(keys, values)}
     flat_params = flax.traverse_util.flatten_dict(params)
-    for k in flat_params: 
-        if len(k) < 4 or not k[2].startswith(vit_variant): 
+    for k in flat_params:
+        if len(k) < 4 or not k[2].startswith(vit_variant):
             continue
         timm_translated_key = k[3:]
-        
+
         old_param = flat_params[k]
         timm_param = timm_flat_params[timm_translated_key]
-        
+
         assert old_param.dtype == timm_param.dtype
-        if old_param.shape != timm_param.shape: 
-            logging.warning(f'Received parameter of shape {timm_param.shape} when trying to load param for {k}, expected {old_param.shape}. Skipping.')
+        if old_param.shape != timm_param.shape:
+            logging.warning(
+                f"Received parameter of shape {timm_param.shape} when trying to load param for {k}, expected {old_param.shape}. Skipping."
+            )
             continue
         flat_params[k] = timm_param
-        if verbose: 
-            logging.info(f'Replaced parameter with key {k}...')
-    
+        if verbose:
+            logging.info(f"Replaced parameter with key {k}...")
+
     updated_params = flax.traverse_util.unflatten_dict(flat_params)
     return updated_params
 
+
 from functools import partial
 
-def tvl_loader_local(params, verbose=False):
-    return timm_vit_loader(params, restore_path='/home/joshwajones/ported_weights_tvl_tvl_vitbgs_params_jax.npz', vit_variant='tvlViT', verbose=verbose) 
 
-def tvl_loader(params, restore_path='gs://619c8f721786ba/ported_weights/tvl/tvl_vitbgs_params_jax.npz', verbose=False):
-    return timm_vit_loader(params, restore_path=restore_path, vit_variant='tvlViT', verbose=verbose) 
+def tvl_loader_local(params, verbose=False):
+    return timm_vit_loader(
+        params,
+        restore_path="/home/joshwajones/ported_weights_tvl_tvl_vitbgs_params_jax.npz",
+        vit_variant="tvlViT",
+        verbose=verbose,
+    )
+
+
+def tvl_loader(
+    params,
+    restore_path="gs://619c8f721786ba/ported_weights/tvl/tvl_vitbgs_params_jax.npz",
+    verbose=False,
+):
+    return timm_vit_loader(
+        params, restore_path=restore_path, vit_variant="tvlViT", verbose=verbose
+    )
+
 
 def t3_loader(params, restore_path, verbose=False):
-    return timm_vit_loader(params, vit_variant='t3ViT', restore_path=restore_path, verbose=verbose)
+    return timm_vit_loader(
+        params, vit_variant="t3ViT", restore_path=restore_path, verbose=verbose
+    )
+
 
 def t3medium_loader(params, verbose=False):
-    return t3_loader(params, restore_path='gs://619c8f721786ba/ported_weights/t3/t3_jax_mini_medium.npz', verbose=verbose)
+    return t3_loader(
+        params,
+        restore_path="gs://619c8f721786ba/ported_weights/t3/t3_jax_mini_medium.npz",
+        verbose=verbose,
+    )
+
 
 def mae_weights_loader(
-    params, 
+    params,
     restore_path,
     verbose=False,
-): 
-    with tf.io.gfile.GFile(restore_path, 'rb') as f:
+):
+    with tf.io.gfile.GFile(restore_path, "rb") as f:
         ckpt_dict = np.load(f, allow_pickle=False)
     keys, values = zip(*list(ckpt_dict.items()))
-    mae_flat_params = {tuple(k.split('|')): v for k, v in zip(keys, values)}
+    mae_flat_params = {tuple(k.split("|")): v for k, v in zip(keys, values)}
     flat_params = flax.traverse_util.flatten_dict(params)
-    for k in flat_params: 
-        if len(k) < 4 or not k[2].startswith('JaxMAE'): 
+    for k in flat_params:
+        if len(k) < 4 or not k[2].startswith("JaxMAE"):
             continue
         mae_translated_key = k[3:]
-        
+
         old_param = flat_params[k]
         mae_param = mae_flat_params[mae_translated_key]
-        
+
         assert old_param.dtype == mae_param.dtype
-        if old_param.shape != mae_param.shape: 
-            logging.warning(f'Received parameter of shape {mae_param.shape} when trying to load param for {k}, expected {old_param.shape}. Skipping.')
+        if old_param.shape != mae_param.shape:
+            logging.warning(
+                f"Received parameter of shape {mae_param.shape} when trying to load param for {k}, expected {old_param.shape}. Skipping."
+            )
             continue
         flat_params[k] = mae_param
-        if verbose: 
-            logging.info(f'Replaced parameter with key {k}...')
-    
+        if verbose:
+            logging.info(f"Replaced parameter with key {k}...")
+
     updated_params = flax.traverse_util.unflatten_dict(flat_params)
     return updated_params

@@ -1,53 +1,51 @@
-
 from typing import Dict, Optional
 
 import flax.linen as nn
 import jax
-import jax.numpy as jnp 
-from octo.utils.typing import Data, Sequence
+import jax.numpy as jnp
 from octo.model.components.vit_encoders import StdConv, ViTResnet
+from octo.utils.typing import Data, Sequence
 
 
-
-class ResnetModule(nn.Module): 
-    image_encoder_stages: Sequence[tuple[str, tuple]] = (("image_primary", (2, 2, 2, 2)), ("image_wrist", (2, 2, 2, 2))) 
+class ResnetModule(nn.Module):
+    image_encoder_stages: Sequence[tuple[str, tuple]] = (
+        ("image_primary", (2, 2, 2, 2)),
+        ("image_wrist", (2, 2, 2, 2)),
+    )
     image_embedding_size: int = 512
-    mlp_widths: tuple[int] = ()  
+    mlp_widths: tuple[int] = ()
     language_key: str = "language_instruction"
     action_dim: int = 7
-    action_pred_horizon: int = 1  
+    action_pred_horizon: int = 1
 
     @nn.compact
     def __call__(
-        self, 
-        batch: Data, 
-    ): 
-        observations = batch['observation']
+        self,
+        batch: Data,
+    ):
+        observations = batch["observation"]
         b, w = observations[self.image_encoder_stages[0][0]].shape[:2]
         embeddings = []
-        for observation_key, encoder_stages in self.image_encoder_stages: 
-            embedding = ViTResnet(num_layers=encoder_stages)(observations[observation_key])
-            embedding = StdConv(
-                self.image_embedding_size, 
-                (3, 3)
-            )(embedding) 
-            embedding = jnp.mean(embedding, axis = (-2, -3)) # GAP
+        for observation_key, encoder_stages in self.image_encoder_stages:
+            embedding = ViTResnet(num_layers=encoder_stages)(
+                observations[observation_key]
+            )
+            embedding = StdConv(self.image_embedding_size, (3, 3))(embedding)
+            embedding = jnp.mean(embedding, axis=(-2, -3))  # GAP
             embeddings.append(embedding)
-        
-        lang = jnp.tile(batch['task'][self.language_key][:, None, ...], (1, w, 1)) # repeat task embedding over window
+
+        lang = jnp.tile(
+            batch["task"][self.language_key][:, None, ...], (1, w, 1)
+        )  # repeat task embedding over window
         embeddings.append(lang)
         x = jnp.concatenate(embeddings, axis=-1)
         x = jnp.reshape(b, -1)
-        for width in self.mlp_widths: 
+        for width in self.mlp_widths:
             x = nn.Dense(width)(x)
-        x = nn.Dense(self.action_dim * self.action_pred_horizon)(x) 
+        x = nn.Dense(self.action_dim * self.action_pred_horizon)(x)
         x = jnp.reshape(x, (-1, self.action_pred_horizon, self.action_dim))
-        return x 
+        return x
 
-
-
-
-    
     def create(
         cls,
         observation_tokenizers: Dict[str, ModuleSpec],

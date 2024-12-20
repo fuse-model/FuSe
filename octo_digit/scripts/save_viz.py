@@ -1,25 +1,26 @@
 import datetime
 from enum import Flag
 from functools import partial
+import importlib
 import os
 
-import jax.numpy as jnp
 from absl import app, flags, logging
 import flax
 from flax.traverse_util import flatten_dict, unflatten_dict
 import jax
+import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
-import importlib
-from octo.model.components.tokenizers import BinTokenizer, LowdimObsTokenizer, ImageTokenizer, UnsqueezingImageTokenizer, ProjectionTokenizer, SiglipTokenizer
-import optax
-import tensorflow as tf
-import tqdm
-import wandb
-
-
-from octo.model.components.vit_encoders import SmallStem16
 from octo.data.dataset import make_single_dataset
+from octo.model.components.tokenizers import (
+    BinTokenizer,
+    ImageTokenizer,
+    LowdimObsTokenizer,
+    ProjectionTokenizer,
+    SiglipTokenizer,
+    UnsqueezingImageTokenizer,
+)
+from octo.model.components.vit_encoders import SmallStem16
 from octo.model.octo_model import OctoModel
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
@@ -38,6 +39,10 @@ from octo.utils.train_utils import (
     Timer,
     TrainState,
 )
+import optax
+import tensorflow as tf
+import tqdm
+import wandb
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -64,17 +69,19 @@ config_flags.DEFINE_config_file(
 
 MAX_KEY_LEN = 15
 INDENT_SIZE = MAX_KEY_LEN + 4
-INDENT = ''.join([' ' for _ in range(INDENT_SIZE)])
-def recursive_dict_print(dictionary, prefix=""): 
-    for key, val in dictionary.items(): 
+INDENT = "".join([" " for _ in range(INDENT_SIZE)])
+
+
+def recursive_dict_print(dictionary, prefix=""):
+    for key, val in dictionary.items():
         key = key[:MAX_KEY_LEN]
-        if isinstance(val, dict): 
-            print(f'{prefix}{key}')
+        if isinstance(val, dict):
+            print(f"{prefix}{key}")
             new_prefix = prefix + INDENT
             recursive_dict_print(val, new_prefix)
-        else: 
-            indent = ''.join([' ' for _ in range(INDENT_SIZE - len(key))])
-            print(f'{prefix}{key}:{indent}{val.shape}')
+        else:
+            indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
+            print(f"{prefix}{key}:{indent}{val.shape}")
 
 
 def main(_):
@@ -128,42 +135,38 @@ def main(_):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
     timer = Timer()
-    gcloud_path = 'gs://619c8f721786ba/octo_ckpts/octo/' 
+    gcloud_path = "gs://619c8f721786ba/octo_ckpts/octo/"
     run_args_list = [
-        { 
-            'name': 'finetune_vizonly_diffusion_val', 
-            'timestamp': '20240517_021703',
-            'dataset_name': 'digit_dataset:8.8.0', 
-        }, 
-        { 
-            'name': 'finetune_vizonly_mse_val', 
-            'timestamp': '20240517_022456',
-            'dataset_name': 'digit_dataset:8.8.0',
+        {
+            "name": "finetune_vizonly_diffusion_val",
+            "timestamp": "20240517_021703",
+            "dataset_name": "digit_dataset:8.8.0",
         },
         {
-            'name': 'finetune_vizonly_diffusion_val_small', 
-            'timestamp': '20240517_022228', 
-            'dataset_name': 'digit_dataset:9.9.0'
-        }, 
-        { 
-            'name': 'finetune_vizonly_mse_val_small', 
-            'timestamp': '20240517_022019', 
-            'dataset_name': 'digit_dataset:9.9.0'
-        }
+            "name": "finetune_vizonly_mse_val",
+            "timestamp": "20240517_022456",
+            "dataset_name": "digit_dataset:8.8.0",
+        },
+        {
+            "name": "finetune_vizonly_diffusion_val_small",
+            "timestamp": "20240517_022228",
+            "dataset_name": "digit_dataset:9.9.0",
+        },
+        {
+            "name": "finetune_vizonly_mse_val_small",
+            "timestamp": "20240517_022019",
+            "dataset_name": "digit_dataset:9.9.0",
+        },
     ]
 
+    for run_args in run_args_list:
 
-    for run_args in run_args_list: 
-
-        FLAGS.config['dataset_kwargs']['name'] = run_args['dataset_name']
+        FLAGS.config["dataset_kwargs"]["name"] = run_args["dataset_name"]
         name = format_name_with_config(
-            run_args['name'],
+            run_args["name"],
             FLAGS.config.to_dict(),
         )
-        wandb_id = "{name}_{time}".format(
-            name=name,
-            time=run_args['timestamp']
-        )
+        wandb_id = "{name}_{time}".format(name=name, time=run_args["timestamp"])
         wandb.init(
             config=FLAGS.config.to_dict(),
             id=wandb_id,
@@ -178,15 +181,11 @@ def main(_):
         # Load Pretrained model + optionally modify config
         #
         #########
-        ckpt_path = gcloud_path + run_args['name'] + '_' + run_args['timestamp']
-        pretrained_model_kwargs = {
-            "checkpoint_path": ckpt_path
-        }
+        ckpt_path = gcloud_path + run_args["name"] + "_" + run_args["timestamp"]
+        pretrained_model_kwargs = {"checkpoint_path": ckpt_path}
         for step in range(5000, 50001, 5000):
-            pretrained_model_kwargs["step"] = step 
-            pretrained_model = OctoModel.load_pretrained(
-                **pretrained_model_kwargs
-            )
+            pretrained_model_kwargs["step"] = step
+            pretrained_model = OctoModel.load_pretrained(**pretrained_model_kwargs)
             rng = jax.random.PRNGKey(FLAGS.config.seed)
             rng, init_rng = jax.random.split(rng)
             model = pretrained_model
@@ -194,7 +193,7 @@ def main(_):
             flat_config = flax.traverse_util.flatten_dict(
                 pretrained_model.config, keep_empty_nodes=True
             )
-            
+
             config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
             # config.update(FLAGS.config.get("update_config", ConfigDict()))
             config = config.to_dict()
@@ -218,7 +217,9 @@ def main(_):
 
             params = model.params
             if FLAGS.config.optimizer.frozen_keys is None:
-                FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
+                FLAGS.config.optimizer.frozen_keys = model.config["optimizer"][
+                    "frozen_keys"
+                ]
 
             tx, lr_callable, param_norm_callable = create_optimizer(
                 params,
@@ -252,8 +253,6 @@ def main(_):
             with timer("visualize"):
                 viz_metrics = viz_callback(train_state, step)
                 wandb_log(viz_metrics, step=step)
-
-
 
 
 if __name__ == "__main__":

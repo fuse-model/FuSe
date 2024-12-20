@@ -2,17 +2,16 @@ import importlib
 import json
 from typing import Any, Callable, Dict, Generic, Mapping, TypeVar
 
-import optax
 from flax import linen as nn
 from flax import struct
-from flax.core.frozen_dict import FrozenDict, freeze, unfreeze
+from flax.core.frozen_dict import freeze, FrozenDict, unfreeze
 import jax
-import tensorflow as tf
+import optax
 import orbax.checkpoint as ocp
-from scalax.sharding import MeshShardingHelper, PartitionSpec
-
-from palivla.utils import freeze_structure
 from palivla.types import Params
+from palivla.utils import freeze_structure
+from scalax.sharding import MeshShardingHelper, PartitionSpec
+import tensorflow as tf
 
 T = TypeVar("T")
 
@@ -29,7 +28,13 @@ class CtorSpec(Generic[T]):
         return isinstance(data, Mapping) and "__ctor" in data and "config" in data
 
     @classmethod
-    def create(cls, ctor: Callable[..., T] | str, config: Dict[str, Any], load_fn: Callable[..., Params] | None = None, load_kwargs: Dict[str, Any] | None = None) -> "CtorSpec[T]":
+    def create(
+        cls,
+        ctor: Callable[..., T] | str,
+        config: Dict[str, Any],
+        load_fn: Callable[..., Params] | None = None,
+        load_kwargs: Dict[str, Any] | None = None,
+    ) -> "CtorSpec[T]":
         config = jax.tree.map(
             lambda x: CtorSpec.from_dict(x) if CtorSpec.is_ctor_spec_dict(x) else x,
             config,
@@ -39,14 +44,19 @@ class CtorSpec(Generic[T]):
         if load_kwargs is None:
             load_kwargs = {}
         load_kwargs = freeze_structure(load_kwargs)
-        return cls(ctor=ctor, config=freeze(config), load_fn=load_fn, load_kwargs=freeze(load_kwargs))
+        return cls(
+            ctor=ctor,
+            config=freeze(config),
+            load_fn=load_fn,
+            load_kwargs=freeze(load_kwargs),
+        )
 
     @classmethod
     def from_name(cls, ctor_full_name: str, config: Dict[str, Any]):
         ctor_module = importlib.import_module(".".join(ctor_full_name.split(".")[:-1]))
         ctor_name = ctor_full_name.split(".")[-1]
         ctor = getattr(ctor_module, ctor_name)
-        
+
         load_fn_str = config.pop("load_fn", None)
         load_kwargs = config.pop("load_kwargs", {})
         if load_fn_str:
@@ -55,7 +65,7 @@ class CtorSpec(Generic[T]):
             load_fn = getattr(load_module, load_fn_name)
         else:
             load_fn = None
-            
+
         return cls.create(ctor, config, load_fn, load_kwargs)
 
     def instantiate(self, **kwargs) -> T:

@@ -67,7 +67,6 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
-
 _DESCRIPTION = """RSVQA-HR dataset."""
 
 # pylint: disable=line-too-long
@@ -88,106 +87,108 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 # When running locally (recommended), copy files as above an use these:
-PATH = '/tmp/data/rsvqa_hr/'
+PATH = "/tmp/data/rsvqa_hr/"
 
 
 class RsvqaHrConfig(tfds.core.BuilderConfig):
-  """Config to specify each variant."""
+    """Config to specify each variant."""
 
-  def __init__(self, nonum, **kwargs):
-    name = 'nonum' if nonum else 'all'
-    super(RsvqaHrConfig, self).__init__(name=name, **kwargs)
-    self.nonum = nonum
+    def __init__(self, nonum, **kwargs):
+        name = "nonum" if nonum else "all"
+        super(RsvqaHrConfig, self).__init__(name=name, **kwargs)
+        self.nonum = nonum
 
 
 class RsvqaHr(tfds.core.GeneratorBasedBuilder):
-  """DatasetBuilder for RSVQA-HR dataset."""
+    """DatasetBuilder for RSVQA-HR dataset."""
 
-  VERSION = tfds.core.Version('1.0.2')
-  RELEASE_NOTES = {
-      '1.0.0': 'First release.',
-      '1.0.1': 'Rename binned values.',
-      '1.0.2': 'Removed explicit png image encoding.',
-      }
-
-  BUILDER_CONFIGS = [
-      RsvqaHrConfig(nonum=False),
-      RsvqaHrConfig(nonum=True),
-  ]
-
-  def _info(self):
-    """Returns the metadata."""
-
-    return tfds.core.DatasetInfo(
-        builder=self,
-        description=_DESCRIPTION,
-        features=tfds.features.FeaturesDict({
-            'question_id': tfds.features.Scalar(np.int32),
-            'filename': tfds.features.Text(),
-            'image': tfds.features.Image(),
-            'question': tfds.features.Text(),
-            'question_type': tfds.features.Text(),
-            'answers': tfds.features.Sequence(tfds.features.Text()),
-            'raw_answers': tfds.features.Sequence(tfds.features.Text()),
-        }),
-        supervised_keys=None,
-        homepage='https://rsvqa.sylvainlobry.com/',
-        citation=_CITATION,
-    )
-
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Returns SplitGenerators."""
-    return {
-        split: self._generate_examples(split)
-        for split in ('train', 'val', 'test', 'test_2')
+    VERSION = tfds.core.Version("1.0.2")
+    RELEASE_NOTES = {
+        "1.0.0": "First release.",
+        "1.0.1": "Rename binned values.",
+        "1.0.2": "Removed explicit png image encoding.",
     }
 
-  def _generate_examples(self, split):
-    """Yields (key, example) tuples."""
-    if split == 'test_2':
-      split = 'test_phili'
-    questions_path = os.path.join(PATH + f'USGS_split_{split}_questions.json')
-    answers_path = os.path.join(PATH + f'USGS_split_{split}_answers.json')
-    images_path = os.path.join(PATH + 'Data')
+    BUILDER_CONFIGS = [
+        RsvqaHrConfig(nonum=False),
+        RsvqaHrConfig(nonum=True),
+    ]
 
-    with open(questions_path, 'r') as f:
-      questions = json.loads(f.read())['questions']
-    with open(answers_path, 'r') as f:
-      answers = json.loads(f.read())['answers']
+    def _info(self):
+        """Returns the metadata."""
 
-    for q, a in zip(questions, answers):
-      assert q['active'] == a['active']
-      if not q['active']:
-        continue
-      if self.builder_config.nonum and q['type'] in ('area', 'count'):
-        continue
-      assert q['answers_ids'][0] == a['id']
-      assert q['id'] == a['question_id']
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict(
+                {
+                    "question_id": tfds.features.Scalar(np.int32),
+                    "filename": tfds.features.Text(),
+                    "image": tfds.features.Image(),
+                    "question": tfds.features.Text(),
+                    "question_type": tfds.features.Text(),
+                    "answers": tfds.features.Sequence(tfds.features.Text()),
+                    "raw_answers": tfds.features.Sequence(tfds.features.Text()),
+                }
+            ),
+            supervised_keys=None,
+            homepage="https://rsvqa.sylvainlobry.com/",
+            citation=_CITATION,
+        )
 
-      filename = f'{q["img_id"]}.png'
-      yield q['id'], {
-          'question_id': q['id'],
-          'filename': filename,
-          'image': os.path.join(images_path, filename),
-          'question': q['question'],
-          'question_type': q['type'],
-          'answers': [bin_answer(a['answer'], q['type'])],
-          'raw_answers': [a['answer']],
-      }
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Returns SplitGenerators."""
+        return {
+            split: self._generate_examples(split)
+            for split in ("train", "val", "test", "test_2")
+        }
+
+    def _generate_examples(self, split):
+        """Yields (key, example) tuples."""
+        if split == "test_2":
+            split = "test_phili"
+        questions_path = os.path.join(PATH + f"USGS_split_{split}_questions.json")
+        answers_path = os.path.join(PATH + f"USGS_split_{split}_answers.json")
+        images_path = os.path.join(PATH + "Data")
+
+        with open(questions_path, "r") as f:
+            questions = json.loads(f.read())["questions"]
+        with open(answers_path, "r") as f:
+            answers = json.loads(f.read())["answers"]
+
+        for q, a in zip(questions, answers):
+            assert q["active"] == a["active"]
+            if not q["active"]:
+                continue
+            if self.builder_config.nonum and q["type"] in ("area", "count"):
+                continue
+            assert q["answers_ids"][0] == a["id"]
+            assert q["id"] == a["question_id"]
+
+            filename = f'{q["img_id"]}.png'
+            yield q["id"], {
+                "question_id": q["id"],
+                "filename": filename,
+                "image": os.path.join(images_path, filename),
+                "question": q["question"],
+                "question_type": q["type"],
+                "answers": [bin_answer(a["answer"], q["type"])],
+                "raw_answers": [a["answer"]],
+            }
 
 
 def bin_answer(answer, question_type):
-  """Bins answers into expected ranges."""
-  if question_type == 'area':
-    area = int(answer[:-2])
-    if area == 0:
-      return '0 m2'
-    elif area <= 10:
-      return 'between 1 m2 and 10 m2'
-    elif area <= 100:
-      return 'between 11 m2 and 100 m2'
-    elif area <= 1000:
-      return 'between 101 m2 and 1000 m2'
-    else:
-      return 'more than 1000 m2'
-  return answer
+    """Bins answers into expected ranges."""
+    if question_type == "area":
+        area = int(answer[:-2])
+        if area == 0:
+            return "0 m2"
+        elif area <= 10:
+            return "between 1 m2 and 10 m2"
+        elif area <= 100:
+            return "between 11 m2 and 100 m2"
+        elif area <= 1000:
+            return "between 101 m2 and 1000 m2"
+        else:
+            return "more than 1000 m2"
+    return answer

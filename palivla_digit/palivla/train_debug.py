@@ -1,26 +1,24 @@
+from absl import app, flags
+from absl import logging as absl_logging
 import jax
 import jax.numpy as jnp
-import orbax.checkpoint as ocp
-
-import tensorflow as tf
-import tqdm
-from absl import app, flags, logging as absl_logging
 from ml_collections import config_flags
-from scalax.sharding import (
-    MeshShardingHelper,
-    FSDPShardingRule,
-    PartitionSpec,
-)
-
-import wandb
 import numpy as np
-
-from palivla.dataset import make_base_dataset, make_base_single_dataset, transform_dataset
+import orbax.checkpoint as ocp
+from palivla.dataset import (
+    make_base_dataset,
+    make_base_single_dataset,
+    transform_dataset,
+)
 from palivla.load_model import make_optimizer
 from palivla.spec import OptimizerSpec
 from palivla.train_state import PaliVLATrainState
 from palivla.train_step import TrainingBatch
 from palivla.utils import host_broadcast_str
+from scalax.sharding import FSDPShardingRule, MeshShardingHelper, PartitionSpec
+import tensorflow as tf
+import tqdm
+import wandb
 
 jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
@@ -122,7 +120,7 @@ def main(_):
                 tokens=batch["tokens"],
                 tokens_ar=batch["mask_ar"],
                 tokens_loss=batch.get("mask_loss", None),
-                tokens_mask=batch["mask_input"]
+                tokens_mask=batch["mask_input"],
             )
         )
 
@@ -184,7 +182,9 @@ def main(_):
 
     # Main training loop
     start_step = model.model_state.step.item()
-    with tqdm.trange(start_step, config.num_steps, desc="Training", dynamic_ncols=True) as pbar:
+    with tqdm.trange(
+        start_step, config.num_steps, desc="Training", dynamic_ncols=True
+    ) as pbar:
         for i in pbar:
             batch = next(train_it)
             info = model.train_step(batch)
@@ -225,7 +225,7 @@ def main(_):
             if (i + 1) % config.save_interval == 0:
                 if config.save_path is not None:
                     print(f"Saving model to {config.save_path}/{i}")
-                    checkpoint_save_manager.save(i+1, args=model.save_args())
+                    checkpoint_save_manager.save(i + 1, args=model.save_args())
     checkpoint_save_manager.wait_until_finished()
 
 

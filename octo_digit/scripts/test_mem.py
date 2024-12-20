@@ -1,32 +1,34 @@
 import datetime
 from functools import partial
+import importlib
 import os
 
-import jax.numpy as jnp
 from absl import app, flags, logging
 import flax
 from flax.traverse_util import flatten_dict, unflatten_dict
 import jax
+import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
-import importlib
-from octo.model.components.tokenizers import BinTokenizer, LowdimObsTokenizer, ImageTokenizer, UnsqueezingImageTokenizer, ProjectionTokenizer, SiglipTokenizer
-import optax
-import tensorflow as tf
-import tqdm
-import wandb
-
-from octo.model.components.vit_encoders import SmallStem16
 from octo.data.dataset import make_single_dataset
+from octo.model.components.tokenizers import (
+    BinTokenizer,
+    ImageTokenizer,
+    LowdimObsTokenizer,
+    ProjectionTokenizer,
+    SiglipTokenizer,
+    UnsqueezingImageTokenizer,
+)
+from octo.model.components.vit_encoders import SmallStem16
 from octo.model.octo_model import OctoModel
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_callbacks import (
+    GradCAMVisualizationCallback,
     RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
-    GradCAMVisualizationCallback,
 )
 from octo.utils.train_utils import (
     check_config_diff,
@@ -37,6 +39,10 @@ from octo.utils.train_utils import (
     Timer,
     TrainState,
 )
+import optax
+import tensorflow as tf
+import tqdm
+import wandb
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -63,17 +69,19 @@ config_flags.DEFINE_config_file(
 
 MAX_KEY_LEN = 15
 INDENT_SIZE = MAX_KEY_LEN + 4
-INDENT = ''.join([' ' for _ in range(INDENT_SIZE)])
-def recursive_dict_print(dictionary, prefix=""): 
-    for key, val in dictionary.items(): 
+INDENT = "".join([" " for _ in range(INDENT_SIZE)])
+
+
+def recursive_dict_print(dictionary, prefix=""):
+    for key, val in dictionary.items():
         key = key[:MAX_KEY_LEN]
-        if isinstance(val, dict): 
-            print(f'{prefix}{key}')
+        if isinstance(val, dict):
+            print(f"{prefix}{key}")
             new_prefix = prefix + INDENT
             recursive_dict_print(val, new_prefix)
-        else: 
-            indent = ''.join([' ' for _ in range(INDENT_SIZE - len(key))])
-            print(f'{prefix}{key}:{indent}{val.shape}')
+        else:
+            indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
+            print(f"{prefix}{key}:{indent}{val.shape}")
 
 
 def main(_):
@@ -146,12 +154,10 @@ def main(_):
     #
     #########
     pretrained_model_kwargs = {"checkpoint_path": FLAGS.config.pretrained_path}
-    if hasattr(FLAGS.config, "pretrained_step"): 
-        pretrained_model_kwargs["step"] = step=FLAGS.config.pretrained_step
+    if hasattr(FLAGS.config, "pretrained_step"):
+        pretrained_model_kwargs["step"] = step = FLAGS.config.pretrained_step
 
-    pretrained_model = OctoModel.load_pretrained(
-        **pretrained_model_kwargs
-    )
+    pretrained_model = OctoModel.load_pretrained(**pretrained_model_kwargs)
     flat_config = flax.traverse_util.flatten_dict(
         pretrained_model.config, keep_empty_nodes=True
     )
@@ -200,14 +206,13 @@ def main(_):
     train_data_iter = map(process_batch, train_data_iter)
     example_batch = next(train_data_iter)
 
-
-    # print example batch 
+    # print example batch
     print("############################################")
-    print('Example batch:')
-    print('\n\n')
+    print("Example batch:")
+    print("\n\n")
     recursive_dict_print(example_batch)
-    # if FLAGS.debug: 
-    #    from PIL import Image 
+    # if FLAGS.debug:
+    #    from PIL import Image
     #    img_digit_l = Image.fromarray(example_batch['observation']['image_digit_left'][0][0])
     #    img_digit_l.save('./debug_example_batch/img_digit_l.jpeg')
 
@@ -217,18 +222,17 @@ def main(_):
     #    img_wrist = Image.fromarray(example_batch['observation']['image_wrist'][0][0])
     #    img_wrist.save('./debug_example_batch/img_wrist.jpeg')
 
-    print('\n\n')
+    print("\n\n")
     print("############################################")
-
 
     #########
     #
-    # New obs/ac space 
-    # 
+    # New obs/ac space
+    #
     #########
     new_obs_tokenizers = FLAGS.config.new_obs_tokenizers
     for key, val in new_obs_tokenizers.items():
-        config["model"]["observation_tokenizers"][key] =  val 
+        config["model"]["observation_tokenizers"][key] = val
 
     #########
     #
@@ -237,8 +241,8 @@ def main(_):
     #########
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    config['max_horizon'] = 100 
-    config['model']['max_horizon'] = 100
+    config["max_horizon"] = 100
+    config["model"]["max_horizon"] = 100
     model = OctoModel.from_config(
         config,
         example_batch,
@@ -250,15 +254,15 @@ def main(_):
     model = model.replace(params=merged_params)
     del pretrained_model
 
-    if "siglip" in new_obs_tokenizers: 
+    if "siglip" in new_obs_tokenizers:
+
         def load(model_cfg, img_load_kw={}, txt_load_kw={}):
-            restored_params = {} 
+            restored_params = {}
             encoder_path = model_cfg.encoder_path
             restored_params["img"] = importlib.import_module(
                 f"big_vision.models.{model_cfg.get('image_model', 'vit')}"
             ).load(None, encoder_path, model_cfg.image, **img_load_kw)
             return restored_params
-
 
         siglip_cfg = FLAGS.config["siglip_config"]
         model_cfg = ConfigDict(siglip_cfg)
@@ -271,12 +275,9 @@ def main(_):
         merged_params = merge_params(model.params, pretrained_siglip_params)
         model = model.replace(params=merged_params)
 
-
     flattened = flatten_dict(model.params)
     for key in flattened.keys():
         print(key)
-    
-
 
     #########
     #
@@ -424,8 +425,8 @@ def main(_):
 
     # gradcam_callback = GradCAMVisualizationCallback(
     #     text_processor=text_processor,
-    #     val_dataset_kwargs_list=dataset_kwargs_list, 
-    #     dataset_kwargs=FLAGS.config, 
+    #     val_dataset_kwargs_list=dataset_kwargs_list,
+    #     dataset_kwargs=FLAGS.config,
     #     **FLAGS.config.gradcam_kwargs
     # )
     #########
@@ -490,7 +491,7 @@ def main(_):
                 wandb_log(viz_metrics, step=i)
 
             # with timer('gradcam'):
-            #     gradcam_metrics = gradcam_callback(train_state, i + 1) 
+            #     gradcam_metrics = gradcam_callback(train_state, i + 1)
             #     wandb_log(gradcam_metrics, step=i)
 
         #     if rollout_callback is not None:
@@ -503,12 +504,12 @@ def main(_):
             save_callback(train_state, i + 1)
 
     import pathlib
-    parent_directory = pathlib.Path(__file__).parent.resolve()
-    log_file = os.path.join(parent_directory, 'mem_log.txt')
-    success_str = f"batch_size={FLAGS.config.batch_size}, window_size={FLAGS.config['window_size']}\n"
-    with open(log_file, 'a') as file: 
-        file.write(success_str)
 
+    parent_directory = pathlib.Path(__file__).parent.resolve()
+    log_file = os.path.join(parent_directory, "mem_log.txt")
+    success_str = f"batch_size={FLAGS.config.batch_size}, window_size={FLAGS.config['window_size']}\n"
+    with open(log_file, "a") as file:
+        file.write(success_str)
 
 
 if __name__ == "__main__":

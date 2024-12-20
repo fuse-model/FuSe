@@ -1,12 +1,13 @@
+from ml_collections.config_dict import ConfigDict, FieldReference, placeholder
 from octo.data.utils.data_utils import NormalizationType
-from ml_collections.config_dict import placeholder, ConfigDict, FieldReference
-
 from palivla.spec import ModuleSpec
 
 placeholder(int)._value
 
+
 def get_config(config_str: str):
     from palivla.model import get_default_config
+
     num_train_steps = FieldReference(500000, int)
     chunk_size = FieldReference(64, int)
     data_dim = 14
@@ -27,7 +28,7 @@ def get_config(config_str: str):
                 "use_state_conditioning": False,
                 "min_action_value": None,
                 "max_action_value": None,
-            }
+            },
         }
     elif config_str == "conv":
         tokenizer_config = {
@@ -43,7 +44,7 @@ def get_config(config_str: str):
                 "commit_loss_weight": 0.0,
                 "entropy_loss_weight": 0.0,
                 "use_state_conditioning": False,
-            }
+            },
         }
     elif config_str == "bin":
         tokenizer_config = {
@@ -54,7 +55,7 @@ def get_config(config_str: str):
                 "data_horizon": chunk_size,
                 "min_action_value": -2.0,
                 "max_action_value": 2.0,
-            }
+            },
         }
         num_train_steps.set(0)
     else:
@@ -80,10 +81,15 @@ def get_config(config_str: str):
                 "oxe_kwargs": {
                     "data_mix": "aloha",
                     "data_dir": "/data/rlds",
-                    "load_camera_views": ["primary", "secondary", "wrist_left", "wrist_right"],
+                    "load_camera_views": [
+                        "primary",
+                        "secondary",
+                        "wrist_left",
+                        "wrist_right",
+                    ],
                     "load_depth": False,
                     "load_proprio": True,
-                    "load_language": False, # Because we don't want to overwrite the language key
+                    "load_language": False,  # Because we don't want to overwrite the language key
                     "force_recompute_dataset_statistics": False,
                     "action_proprio_normalization_type": NormalizationType.NONE,
                 },
@@ -93,7 +99,12 @@ def get_config(config_str: str):
                 },
                 "frame_transform_kwargs": {
                     "image_augment_kwargs": {},
-                    "resize_size": {"primary": [224, 224], "secondary": [224, 224], "wrist_left": [224, 224], "wrist_right": [224, 224]},
+                    "resize_size": {
+                        "primary": [224, 224],
+                        "secondary": [224, 224],
+                        "wrist_left": [224, 224],
+                        "wrist_right": [224, 224],
+                    },
                     "num_parallel_calls": 64,
                 },
                 "balance_weights": True,

@@ -1,5 +1,6 @@
 # Written by Dibya
 from dataclasses import field
+from functools import partial
 import logging
 from multiprocessing.sharedctypes import Value
 from typing import Dict, Optional
@@ -7,7 +8,6 @@ from typing import Dict, Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-
 from octo.model.components.base import TokenGroup
 from octo.model.components.block_transformer import (
     AttentionRule,
@@ -17,7 +17,6 @@ from octo.model.components.block_transformer import (
 )
 from octo.utils.spec import ModuleSpec
 from octo.utils.typing import Data, Sequence
-from functools import partial
 
 
 class OctoTransformer(nn.Module):
@@ -90,49 +89,56 @@ class OctoTransformer(nn.Module):
     repeat_task_tokens: bool
     use_correct_attention: bool = False
 
-    def setup(self): 
-        for name, tok in self.task_tokenizers.items(): 
+    def setup(self):
+        for name, tok in self.task_tokenizers.items():
             group_name = f"task_{name}"
             setattr(
-                self, 
-                f"{group_name}_projection", 
-                nn.Dense(
-                    self.token_embedding_size, name=f"{group_name}_projection"
-                )
+                self,
+                f"{group_name}_projection",
+                nn.Dense(self.token_embedding_size, name=f"{group_name}_projection"),
             )
-            pos_emb_shape = (*self.token_sizes[group_name].shape[:-1], self.token_embedding_size)
+            pos_emb_shape = (
+                *self.token_sizes[group_name].shape[:-1],
+                self.token_embedding_size,
+            )
             setattr(
-                self, 
-                f"{group_name}_pos_embedding", 
-                self._create_positional_embedding(group_name, pos_emb_shape)
+                self,
+                f"{group_name}_pos_embedding",
+                self._create_positional_embedding(group_name, pos_emb_shape),
             )
-        
-        for name, tok in self.observation_tokenizers.items(): 
+
+        for name, tok in self.observation_tokenizers.items():
             group_name = f"obs_{name}"
             setattr(
-                self, 
-                f"{group_name}_projection", 
-                nn.Dense(
-                    self.token_embedding_size, name=f"{group_name}_projection"
-                )
+                self,
+                f"{group_name}_projection",
+                nn.Dense(self.token_embedding_size, name=f"{group_name}_projection"),
             )
-            pos_emb_shape = (*self.token_sizes[group_name].shape[:-1], self.token_embedding_size)
+            pos_emb_shape = (
+                *self.token_sizes[group_name].shape[:-1],
+                self.token_embedding_size,
+            )
             setattr(
-                self, 
-                f"{group_name}_pos_embedding", 
-                self._create_positional_embedding(group_name, pos_emb_shape)
+                self,
+                f"{group_name}_pos_embedding",
+                self._create_positional_embedding(group_name, pos_emb_shape),
             )
-            batch_size, horizon =self.token_sizes[group_name].shape[:2]
-        
+            batch_size, horizon = self.token_sizes[group_name].shape[:2]
+
         for readout_name, n_tokens_for_readout in self.readouts.items():
             group_name = f"readout_{readout_name}"
-            readout_token_shape = (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size) 
-            setattr(
-                self, 
-                f"{group_name}_pos_embedding", 
-                self._create_positional_embedding(group_name, readout_token_shape)
+            readout_token_shape = (
+                batch_size,
+                horizon,
+                n_tokens_for_readout,
+                self.token_embedding_size,
             )
-        
+            setattr(
+                self,
+                f"{group_name}_pos_embedding",
+                self._create_positional_embedding(group_name, readout_token_shape),
+            )
+
         self.BlockTransformer_0 = BlockTransformer(
             self.transformer_kwargs, use_correct_attention=self.use_correct_attention
         )
@@ -215,15 +221,15 @@ class OctoTransformer(nn.Module):
             if tokenizer_output is None:
                 logging.warning(f"Skipping task tokenizer: {group_name}")
                 continue
-            
-            task_tokens = getattr(
-                self, f"{group_name}_projection"
-            )(tokenizer_output.tokens)
+
+            task_tokens = getattr(self, f"{group_name}_projection")(
+                tokenizer_output.tokens
+            )
             # task_tokens shape is (batch, n_tokens, token_embedding_size)
             # Add positional embedding
-            if name == 'language': 
-                outputs['raw_lang'] = task_tokens
-                
+            if name == "language":
+                outputs["raw_lang"] = task_tokens
+
             task_tokens += self._shape_positional_embedding(
                 getattr(self, f"{group_name}_pos_embedding"),
                 task_tokens,
@@ -237,7 +243,7 @@ class OctoTransformer(nn.Module):
                     attention_rules=task_attention_rules,
                 )
             )
-            
+
         #
         # Next, add the observation tokens
         #
@@ -250,15 +256,14 @@ class OctoTransformer(nn.Module):
                 logging.warning(f"Skipping observation tokenizer: {group_name}")
                 continue
 
-            obs_tokens = getattr(
-                self, f"{group_name}_projection"
-            )(tokenizer_output.tokens)
+            obs_tokens = getattr(self, f"{group_name}_projection")(
+                tokenizer_output.tokens
+            )
             # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 
             # Add positional embedding
             obs_tokens += self._shape_positional_embedding(
-                getattr(self, f"{group_name}_pos_embedding"), 
-                obs_tokens
+                getattr(self, f"{group_name}_pos_embedding"), obs_tokens
             )
 
             # Update mask to account for which timesteps are padding
@@ -328,7 +333,7 @@ class OctoTransformer(nn.Module):
                     attention_rules=readout_attention_rules,
                 )
             )
-            
+
         # Run the transformer!
         assert (
             self.transformer_kwargs.get("add_position_embedding", False) is False
@@ -383,22 +388,27 @@ class OctoTransformer(nn.Module):
             nn.initializers.normal(stddev=0.02),
             shape,
         )
-        return embedding 
-    
-    def _shape_positional_embedding(self, embedding, tokens: jax.Array,): 
+        return embedding
+
+    def _shape_positional_embedding(
+        self,
+        embedding,
+        tokens: jax.Array,
+    ):
         if len(tokens.shape) == 4:
             # Use only the timesteps we receive as input
             embedding = embedding[:, : tokens.shape[1]]
         return jnp.broadcast_to(embedding, tokens.shape)
 
-    def embed_language(self, tasks: Data, train: bool = False): 
-        language_tokenizer = self.task_tokenizers['language']
+    def embed_language(self, tasks: Data, train: bool = False):
+        language_tokenizer = self.task_tokenizers["language"]
         tokenizer_output: TokenGroup = language_tokenizer(None, tasks, train=train)
-        task_tokens = getattr(
-                self, f"task_language_projection"
-            )(tokenizer_output.tokens)
+        task_tokens = getattr(self, f"task_language_projection")(
+            tokenizer_output.tokens
+        )
         return task_tokens
-        
+
+
 class OctoModule(nn.Module):
     """
     Bundles OctoTransformer with various heads (useful for keeping all parameters in one place).
@@ -406,10 +416,14 @@ class OctoModule(nn.Module):
 
     octo_transformer: OctoTransformer
     heads: Dict[str, nn.Module]
-    
 
     def __call__(
-        self, observations, tasks, timestep_pad_mask, train=True, verbose=False,
+        self,
+        observations,
+        tasks,
+        timestep_pad_mask,
+        train=True,
+        verbose=False,
     ):
         """Run transformer and the main method for all heads. Useful for init.
 
@@ -431,17 +445,19 @@ class OctoModule(nn.Module):
         )
         head_outputs = {}
         for head_name, head in self.heads.items():
-            if head_name != 'gen':
+            if head_name != "gen":
                 head_outputs[head_name] = head(transformer_outputs, train=train)
-            else: 
-                for mode in ['visual', 'tactile', 'visual,tactile']: 
-                    head_outputs[f'gen_{mode}'] = head(transformer_outputs, mode=mode, train=train)
+            else:
+                for mode in ["visual", "tactile", "visual,tactile"]:
+                    head_outputs[f"gen_{mode}"] = head(
+                        transformer_outputs, mode=mode, train=train
+                    )
         return transformer_outputs, head_outputs
 
     @classmethod
     def create(
         cls,
-        example_batch: Data, 
+        example_batch: Data,
         observation_tokenizers: Dict[str, ModuleSpec],
         task_tokenizers: Dict[str, ModuleSpec],
         heads: Dict[str, ModuleSpec],
@@ -451,7 +467,7 @@ class OctoModule(nn.Module):
         max_horizon: int,
         repeat_task_tokens: bool = False,
         use_correct_attention: bool = False,
-        skip_wrist: bool = False, 
+        skip_wrist: bool = False,
     ) -> "OctoModule":
         """
         Canonical way to create an OctoModule from configuration.
@@ -473,9 +489,9 @@ class OctoModule(nn.Module):
                 dropout_rate (float): dropout rate.
                 attention_dropout_rate (float): dropout rate in self attention.
         """
-    
-        if 'wrist' in  observation_tokenizers and skip_wrist: 
-            del observation_tokenizers['wrist']
+
+        if "wrist" in observation_tokenizers and skip_wrist:
+            del observation_tokenizers["wrist"]
 
         observation_tokenizer_defs = {
             k: ModuleSpec.instantiate(spec)()
@@ -486,20 +502,30 @@ class OctoModule(nn.Module):
         }
 
         ### Calculate token sizes
-        def output_tokens(module): 
-            out, _ = module.apply({}, example_batch['observation'], example_batch['task'], rngs={"params": jax.random.PRNGKey(0)}, mutable=True, train=False)
+        def output_tokens(module):
+            out, _ = module.apply(
+                {},
+                example_batch["observation"],
+                example_batch["task"],
+                rngs={"params": jax.random.PRNGKey(0)},
+                mutable=True,
+                train=False,
+            )
             return out.tokens
+
         token_sizes = {
-            f'obs_{name}': jax.eval_shape(
-                partial(output_tokens, tok)
-            ) for name, tok in observation_tokenizer_defs.items() 
+            f"obs_{name}": jax.eval_shape(partial(output_tokens, tok))
+            for name, tok in observation_tokenizer_defs.items()
         }
 
-        token_sizes.update({
-            f'task_{name}': jax.eval_shape(
-                partial(output_tokens, tok),
-            ) for name, tok in task_tokenizer_defs.items() 
-        })
+        token_sizes.update(
+            {
+                f"task_{name}": jax.eval_shape(
+                    partial(output_tokens, tok),
+                )
+                for name, tok in task_tokenizer_defs.items()
+            }
+        )
 
         head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
 

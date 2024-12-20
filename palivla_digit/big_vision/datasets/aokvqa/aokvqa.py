@@ -42,6 +42,7 @@ Example to load:
 import json
 import os
 from typing import Any
+
 import numpy as np
 import tensorflow_datasets as tfds
 
@@ -64,22 +65,22 @@ _CITATION = """
 """
 
 ANNOTATION_FILES = {
-    'train': 'aokvqa_v1p0_train.json',
-    'val': 'aokvqa_v1p0_val.json',
-    'test': 'aokvqa_v1p0_test.json',
+    "train": "aokvqa_v1p0_train.json",
+    "val": "aokvqa_v1p0_val.json",
+    "test": "aokvqa_v1p0_test.json",
 }
 
 
 # When running locally (recommended), copy files as above an use these:
-_AOKVQA_PATH = '/tmp/tfds'
+_AOKVQA_PATH = "/tmp/tfds"
 
 
 class AOkVqa(tfds.core.GeneratorBasedBuilder):
-  """AOKVQA dataset for TFDS."""
+    """AOKVQA dataset for TFDS."""
 
-  VERSION = tfds.core.Version('1.0.0')
-  RELEASE_NOTES = {'1.0.0': 'ArrayRecord version.'}
-  MANUAL_DOWNLOAD_INSTRUCTIONS = """
+    VERSION = tfds.core.Version("1.0.0")
+    RELEASE_NOTES = {"1.0.0": "ArrayRecord version."}
+    MANUAL_DOWNLOAD_INSTRUCTIONS = """
   In manual_dir/ you should have a directory a_ok_vqa which contains the
   following files and directories:
   From the A-OKVQA dataset:
@@ -89,94 +90,100 @@ class AOkVqa(tfds.core.GeneratorBasedBuilder):
   It also requires the COCO data files.
   """
 
-  def _info(self) -> tfds.core.DatasetInfo:
-    """Returns the dataset metadata."""
-    features = tfds.features.FeaturesDict({
-        'image': tfds.features.Image(shape=(None, None, 3)),
-        'image_id': tfds.features.Scalar(dtype=np.int64),
-        'direct_answers': tfds.features.Sequence(tfds.features.Text()),
-        'direct_answer_is_difficult': tfds.features.Scalar(dtype=np.bool_),
-        'multiple_choice_possible_answers':  # List of 4 possible answers.
-            tfds.features.Sequence(tfds.features.Text()),
-        'multiple_choice_correct_idx':  # Integer from 0-3.
-            tfds.features.Scalar(dtype=np.int32),
-        'answer_rationales': tfds.features.Sequence(tfds.features.Text()),
-        'question': tfds.features.Text(),
-        'question_id': tfds.features.Text(),
-    })
+    def _info(self) -> tfds.core.DatasetInfo:
+        """Returns the dataset metadata."""
+        features = tfds.features.FeaturesDict(
+            {
+                "image": tfds.features.Image(shape=(None, None, 3)),
+                "image_id": tfds.features.Scalar(dtype=np.int64),
+                "direct_answers": tfds.features.Sequence(tfds.features.Text()),
+                "direct_answer_is_difficult": tfds.features.Scalar(dtype=np.bool_),
+                "multiple_choice_possible_answers": tfds.features.Sequence(  # List of 4 possible answers.
+                    tfds.features.Text()
+                ),
+                "multiple_choice_correct_idx": tfds.features.Scalar(  # Integer from 0-3.
+                    dtype=np.int32
+                ),
+                "answer_rationales": tfds.features.Sequence(tfds.features.Text()),
+                "question": tfds.features.Text(),
+                "question_id": tfds.features.Text(),
+            }
+        )
 
-    return tfds.core.DatasetInfo(
-        builder=self,
-        features=features,
-        description=_DESCRIPTION,
-        supervised_keys=None,
-        homepage='https://okvqa.allenai.org/',
-        citation=_CITATION,
-    )
+        return tfds.core.DatasetInfo(
+            builder=self,
+            features=features,
+            description=_DESCRIPTION,
+            supervised_keys=None,
+            homepage="https://okvqa.allenai.org/",
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager) -> ...:
-    """Call the function which defines the splits."""
-    # data_dir = dl_manager.manual_dir
-    data_dir = _AOKVQA_PATH
-    return {
-        'train': self._generate_examples(data_dir, 'train'),
-        'val': self._generate_examples(data_dir, 'val'),
-        'test': self._generate_examples(data_dir, 'test'),
-    }
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager) -> ...:
+        """Call the function which defines the splits."""
+        # data_dir = dl_manager.manual_dir
+        data_dir = _AOKVQA_PATH
+        return {
+            "train": self._generate_examples(data_dir, "train"),
+            "val": self._generate_examples(data_dir, "val"),
+            "test": self._generate_examples(data_dir, "test"),
+        }
 
-  def _generate_examples(self, data_dir: str, split: str) -> ...:
-    annotations = get_annotations(data_dir, split)
+    def _generate_examples(self, data_dir: str, split: str) -> ...:
+        annotations = get_annotations(data_dir, split)
 
-    for question_id, feature_dict in annotations.items():
-      image_id = feature_dict['image_id']
+        for question_id, feature_dict in annotations.items():
+            image_id = feature_dict["image_id"]
 
-      # Add image and GT segmentatio labels from total_transfer.
-      feature_dict['image'] = self.get_image_path(data_dir, split, image_id)
+            # Add image and GT segmentatio labels from total_transfer.
+            feature_dict["image"] = self.get_image_path(data_dir, split, image_id)
 
-      # Add dummy features for several features in the test set.
-      if split not in ['train', 'val']:
-        assert split == 'test', f'Unknown split: {split}'
-        feature_dict['multiple_choice_correct_idx'] = -1
-        feature_dict['direct_answers'] = []
-        feature_dict['answer_rationales'] = []
-      yield f'{question_id}', feature_dict
+            # Add dummy features for several features in the test set.
+            if split not in ["train", "val"]:
+                assert split == "test", f"Unknown split: {split}"
+                feature_dict["multiple_choice_correct_idx"] = -1
+                feature_dict["direct_answers"] = []
+                feature_dict["answer_rationales"] = []
+            yield f"{question_id}", feature_dict
 
-  def get_image_path(self, data_dir: str, split: str, image_id: int) -> str:
-    return f'{data_dir}/{split}2017/{image_id:012d}.jpg'
+    def get_image_path(self, data_dir: str, split: str, image_id: int) -> str:
+        return f"{data_dir}/{split}2017/{image_id:012d}.jpg"
 
 
-def get_annotations(
-    data_dir: str, split: str) -> dict[int, dict[str, Any]]:
-  """Return okvqa annotations (quesions and answers) as dictionary."""
-  path = os.path.join(data_dir, ANNOTATION_FILES[split])
-  with open(path) as f:
-    annotations = json.load(f)
+def get_annotations(data_dir: str, split: str) -> dict[int, dict[str, Any]]:
+    """Return okvqa annotations (quesions and answers) as dictionary."""
+    path = os.path.join(data_dir, ANNOTATION_FILES[split])
+    with open(path) as f:
+        annotations = json.load(f)
 
-  aokvqa_annotations = {}
-  for annotation in annotations:
-    # Sanity checks
-    assert len(annotation['choices']) == 4
+    aokvqa_annotations = {}
+    for annotation in annotations:
+        # Sanity checks
+        assert len(annotation["choices"]) == 4
 
-    question_id = annotation['question_id']
+        question_id = annotation["question_id"]
 
-    aokvqa_annotations[question_id] = {
-        'image_id': annotation['image_id'],
-        'direct_answer_is_difficult': annotation['difficult_direct_answer'],
-        'multiple_choice_possible_answers': annotation['choices'],
-        'question': annotation['question'],
-        'question_id': annotation['question_id'],
-    }
+        aokvqa_annotations[question_id] = {
+            "image_id": annotation["image_id"],
+            "direct_answer_is_difficult": annotation["difficult_direct_answer"],
+            "multiple_choice_possible_answers": annotation["choices"],
+            "question": annotation["question"],
+            "question_id": annotation["question_id"],
+        }
 
-    # Get answers and rationales for train and val only, not for test.
-    if split in ['train', 'val']:
-      assert len(annotation['direct_answers']) == 10
-      assert len(annotation['rationales']) == 3
+        # Get answers and rationales for train and val only, not for test.
+        if split in ["train", "val"]:
+            assert len(annotation["direct_answers"]) == 10
+            assert len(annotation["rationales"]) == 3
 
-      aokvqa_annotations[question_id]['direct_answers'] = annotation[
-          'direct_answers']
-      aokvqa_annotations[question_id]['answer_rationales'] = annotation[
-          'rationales']
-      aokvqa_annotations[question_id]['multiple_choice_correct_idx'] = (
-          annotation['correct_choice_idx'])
+            aokvqa_annotations[question_id]["direct_answers"] = annotation[
+                "direct_answers"
+            ]
+            aokvqa_annotations[question_id]["answer_rationales"] = annotation[
+                "rationales"
+            ]
+            aokvqa_annotations[question_id]["multiple_choice_correct_idx"] = annotation[
+                "correct_choice_idx"
+            ]
 
-  return aokvqa_annotations
+    return aokvqa_annotations

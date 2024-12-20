@@ -109,13 +109,15 @@ TPU_PODS = {
     },
 }
 
+
 def parse_args(args_str):
     args = {}
     if args_str:
-        for arg in args_str.split(','):
-            key, value = arg.split('=')
+        for arg in args_str.split(","):
+            key, value = arg.split("=")
             args[key] = value
     return args
+
 
 pod_name = os.environ.get("POD_NAME")
 config = None
@@ -147,6 +149,7 @@ read -p "Press any key to continue..."
 
 if os.environ.get("VERBOSE", "0") == "1":
     import pprint
+
     print("*" * 100)
     print("RUNNING WITH CONFIG")
     pprint.pprint(config)

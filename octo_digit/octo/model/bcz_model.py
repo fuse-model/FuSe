@@ -11,14 +11,13 @@ from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 import numpy as np
+from octo.data.utils.text_processing import MuseEmbedding, TextProcessor
+from octo.model.bcz_module import BczModule
+from octo.model.components.bcz_action_heads import BczActionHead
+from octo.utils.spec import ModuleSpec
+from octo.utils.typing import Config, Data, Params, Perturbations, PRNGKey, Sequence
 import orbax.checkpoint
 import tensorflow as tf
-
-from octo.data.utils.text_processing import TextProcessor, MuseEmbedding
-from octo.model.components.bcz_action_heads import BczActionHead
-from octo.model.bcz_module import BczModule
-from octo.utils.spec import ModuleSpec
-from octo.utils.typing import Config, Data, Params, PRNGKey, Perturbations, Sequence
 
 
 @struct.dataclass
@@ -45,7 +44,7 @@ class BczModel:
         """
         tasks = {"pad_mask_dict": {}}
         if goals is not None:
-            raise NotImplementedError # TODO: currently only supports language input
+            raise NotImplementedError  # TODO: currently only supports language input
             tasks.update(goals)
             tasks["pad_mask_dict"].update(
                 {k: np.ones(v.shape[:1], dtype=bool) for k, v in goals.items()}
@@ -122,10 +121,8 @@ class BczModel:
             tasks,
             timestep_pad_mask,
             method="bcz_encoder",
-            train=train
+            train=train,
         )
-
-    
 
     @partial(
         jax.jit,
@@ -160,7 +157,7 @@ class BczModel:
         encoded_features = self.run_encoder(
             observations, tasks, timestep_pad_mask, train=train
         )
-        
+
         action_head: BczActionHead = self.module.bind({"params": self.params}).heads[
             "action"
         ]
@@ -171,7 +168,7 @@ class BczModel:
             embodiment_action_dim=len(unnormalization_statistics["mean"])
             if unnormalization_statistics is not None
             else None,
-            train=train
+            train=train,
         )
         if unnormalization_statistics is not None:
             mask = unnormalization_statistics.get(
@@ -191,7 +188,7 @@ class BczModel:
         cls,
         checkpoint_path: str,
         step: Optional[int] = None,
-        create_perturbations: bool = False
+        create_perturbations: bool = False,
     ) -> "BczModel":
         """Loads a model from a checkpoint that was saved via `save_pretrained`.
 
@@ -264,9 +261,11 @@ class BczModel:
             example_batch["task"],
             example_batch["observation"]["timestep_pad_mask"],
         )
-        if create_perturbations: 
-            perturbations = module.init(jax.random.PRNGKey(0), *init_args, train=False)['perturbations']
-        else: 
+        if create_perturbations:
+            perturbations = module.init(jax.random.PRNGKey(0), *init_args, train=False)[
+                "perturbations"
+            ]
+        else:
             perturbations = None
         params_shape = jax.eval_shape(
             partial(module.init, train=False), jax.random.PRNGKey(0), *init_args
@@ -327,19 +326,19 @@ class BczModel:
             {"save_args": orbax_utils.save_args_from_target(self.params)},
         )
 
-        # for k, v in self.config.items(): 
+        # for k, v in self.config.items():
         #     print(k, v)
         # from typing import Union
         # from ml_collections import ConfigDict
         # dict_like = Union[dict, ConfigDict]
         # print('start dfs')
-        # def dfs(d, key_so_far): 
-        #     if isinstance(d, set): 
+        # def dfs(d, key_so_far):
+        #     if isinstance(d, set):
         #         print(key_so_far, d)
-        #     elif isinstance(d, dict_like): 
-        #         for k, v in d.items(): 
+        #     elif isinstance(d, dict_like):
+        #         for k, v in d.items():
         #             dfs(v, key_so_far + (k,))
-        
+
         # dfs(self.config, tuple())
         # exit(0)
         if jax.process_index() == 0:
@@ -407,8 +406,8 @@ class BczModel:
         variables = _init(rng)
         params = variables["params"]
 
-        perturbations = variables.get('perturbations', None)
-        
+        perturbations = variables.get("perturbations", None)
+
         return cls(
             module=module,
             params=params,
@@ -418,6 +417,7 @@ class BczModel:
             config=config,
             dataset_statistics=dataset_statistics,
         )
+
 
 def _verify_shapes(
     pytree,
@@ -458,12 +458,15 @@ def _verify_shapes(
         and pytree_flat[k].shape[starting_dim:]
         != example_pytree_flat[k].shape[starting_dim:]
     }
-    logging.debug('Mismatched keys:  ', mismatched_keys)
+    logging.debug("Mismatched keys:  ", mismatched_keys)
     SPECTRO_KEY = ("spectro",)
-    if SPECTRO_KEY in mismatched_keys: 
+    if SPECTRO_KEY in mismatched_keys:
         spectro_batch_shape = pytree_flat[SPECTRO_KEY].shape[starting_dim:]
         spectro_example_shape = example_pytree_flat[SPECTRO_KEY].shape[starting_dim:]
-        if len(spectro_batch_shape) == len(spectro_example_shape) - 1 and spectro_batch_shape + (1,) == spectro_example_shape: 
+        if (
+            len(spectro_batch_shape) == len(spectro_example_shape) - 1
+            and spectro_batch_shape + (1,) == spectro_example_shape
+        ):
             del mismatched_keys[SPECTRO_KEY]
     if mismatched_keys:
         if not silent:
@@ -478,29 +481,32 @@ def _verify_shapes(
     if raise_error and (fail or (weak_fail and strict)):
         MAX_KEY_LEN = 15
         INDENT_SIZE = MAX_KEY_LEN + 4
-        INDENT = ''.join([' ' for _ in range(INDENT_SIZE)])
-        def recursive_dict_print(dictionary, prefix=""): 
+        INDENT = "".join([" " for _ in range(INDENT_SIZE)])
+
+        def recursive_dict_print(dictionary, prefix=""):
             lines = []
-            def helper(dic, prefix=""): 
-                for key, val in dic.items(): 
+
+            def helper(dic, prefix=""):
+                for key, val in dic.items():
                     key = key[:MAX_KEY_LEN]
-                    if isinstance(val, dict): 
-                        lines.append(f'{prefix}{key}')
+                    if isinstance(val, dict):
+                        lines.append(f"{prefix}{key}")
                         new_prefix = prefix + INDENT
                         helper(val, new_prefix)
-                    else: 
-                        indent = ''.join([' ' for _ in range(INDENT_SIZE - len(key))])
-                        lines.append(f'{prefix}{key}:{indent}{val.shape}')
+                    else:
+                        indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
+                        lines.append(f"{prefix}{key}:{indent}{val.shape}")
+
             helper(dictionary, prefix=prefix)
             return lines
 
         error_output = []
-        error_output.append('Received pytree:')
+        error_output.append("Received pytree:")
         error_output.extend(recursive_dict_print(pytree))
         error_output.append("#######################")
         error_output.append("example pytree:")
         error_output.extend(example_pytree)
-        logging.error('\n'.join(error_output))
+        logging.error("\n".join(error_output))
         raise AssertionError(f"{name} does not match example batch.")
 
     return weak_fail or fail

@@ -1,5 +1,4 @@
 import adafruit_bno055
-
 import serial
 
 uart = serial.Serial("/dev/tty.usbserial-120")

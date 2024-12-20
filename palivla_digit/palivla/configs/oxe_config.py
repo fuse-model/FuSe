@@ -1,5 +1,4 @@
-from ml_collections.config_dict import placeholder, ConfigDict, FieldReference
-
+from ml_collections.config_dict import ConfigDict, FieldReference, placeholder
 from palivla.model import get_default_config
 from palivla.spec import ModuleSpec
 
@@ -13,6 +12,7 @@ def get_config(config_str: str):
     config_str_list = config_str.split("_")
 
     from big_vision.models.ppp.gemma import get_config
+
     variant = "gemma_2b"
     llm_embdim = get_config(variant).width
     model_config = get_default_config()
@@ -24,17 +24,19 @@ def get_config(config_str: str):
         "image_primary": "img",
         "text": "llm",
     }
-    model_config["target_key_order"] = (
-        "image_primary",
-    )
+    model_config["target_key_order"] = ("image_primary",)
 
     if use_wrist:
         model_config["modality_mappings"]["image_wrist"] = "img"
-        model_config["target_key_order"] = model_config["target_key_order"] + ("image_wrist",)
+        model_config["target_key_order"] = model_config["target_key_order"] + (
+            "image_wrist",
+        )
 
     if use_proprio:
         model_config["modality_mappings"]["proprio"] = "proprio"
-        model_config["target_key_order"] = model_config["target_key_order"] + ("proprio",)
+        model_config["target_key_order"] = model_config["target_key_order"] + (
+            "proprio",
+        )
         model_config["encoder_specs"]["proprio"] = {
             "__ctor": "flax.linen.Dense",
             "config": {"features": llm_embdim},
@@ -93,10 +95,7 @@ def get_config(config_str: str):
                 "oxe_kwargs": {
                     "data_mix": data_mix,
                     "data_dir": "/data/rlds/",
-                    "load_camera_views": [
-                        "primary",
-                        "wrist"
-                    ],
+                    "load_camera_views": ["primary", "wrist"],
                     "load_depth": False,
                     "load_proprio": True,
                     "load_language": True,
@@ -112,10 +111,7 @@ def get_config(config_str: str):
                         "primary": workspace_augment_kwargs,
                         "wrist": wrist_augment_kwargs,
                     },
-                    "resize_size": {
-                        "primary": [224, 224],
-                        "wrist": [224, 224]
-                    },
+                    "resize_size": {"primary": [224, 224], "wrist": [224, 224]},
                     "image_dropout_prob": 0.5,
                 },
                 "balance_weights": True,

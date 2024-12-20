@@ -11,14 +11,13 @@ from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 import numpy as np
-import orbax.checkpoint
-import tensorflow as tf
-
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.components.action_heads import ActionHead
 from octo.model.octo_module import OctoModule
 from octo.utils.spec import ModuleSpec
-from octo.utils.typing import Config, Data, Params, PRNGKey, Perturbations, Sequence
+from octo.utils.typing import Config, Data, Params, Perturbations, PRNGKey, Sequence
+import orbax.checkpoint
+import tensorflow as tf
 
 
 @struct.dataclass
@@ -177,7 +176,7 @@ class OctoModel:
         perturbations,
         train: bool = False,
     ):
-        """Runs the transformer, but logs intermediates and perturbs values, for GradCAM. 
+        """Runs the transformer, but logs intermediates and perturbs values, for GradCAM.
 
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *shape).
@@ -185,7 +184,7 @@ class OctoModel:
             tasks: dict of tasks of shape (batch_size, *shape)
                 Shape must be consistent with self.example_batch["task"]
             timestep_pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
-            params:  current model params 
+            params:  current model params
             perturbations: default perturbations
             train: whether to run in train mode
         """
@@ -197,10 +196,7 @@ class OctoModel:
         )
         _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
 
-        params_kwargs = { 
-            "params": params, 
-            "perturbations": perturbations
-        }
+        params_kwargs = {"params": params, "perturbations": perturbations}
         return self.module.apply(
             params_kwargs,
             observations,
@@ -208,10 +204,8 @@ class OctoModel:
             timestep_pad_mask,
             train=train,
             method="octo_transformer",
-            mutable="intermediates"
+            mutable="intermediates",
         )
-
-    
 
     @partial(
         jax.jit,
@@ -280,8 +274,8 @@ class OctoModel:
         cls,
         checkpoint_path: str,
         step: Optional[int] = None,
-        create_perturbations: bool = False, 
-        skip_load_params: bool = False, 
+        create_perturbations: bool = False,
+        skip_load_params: bool = False,
     ) -> "OctoModel":
         """Loads a model from a checkpoint that was saved via `save_pretrained`.
 
@@ -354,14 +348,20 @@ class OctoModel:
             example_batch["task"],
             example_batch["observation"]["timestep_pad_mask"],
         )
-        if create_perturbations: 
-            perturbations = module.init(jax.random.PRNGKey(0), *init_args, train=False)['perturbations']
-        else: 
+        if create_perturbations:
+            perturbations = module.init(jax.random.PRNGKey(0), *init_args, train=False)[
+                "perturbations"
+            ]
+        else:
             perturbations = None
         if skip_load_params:
-            logging.info('Skipping loading pretrained parameters, training from scratch')
-            params = module.init(jax.random.PRNGKey(0), *init_args, train=False)['params']
-        else: 
+            logging.info(
+                "Skipping loading pretrained parameters, training from scratch"
+            )
+            params = module.init(jax.random.PRNGKey(0), *init_args, train=False)[
+                "params"
+            ]
+        else:
             params_shape = jax.eval_shape(
                 partial(module.init, train=False), jax.random.PRNGKey(0), *init_args
             )["params"]
@@ -490,8 +490,8 @@ class OctoModel:
 
         variables = _init(rng)
         params = variables["params"]
-        perturbations = variables['perturbations']
-        
+        perturbations = variables["perturbations"]
+
         return cls(
             module=module,
             params=params,
@@ -582,12 +582,15 @@ def _verify_shapes(
         and pytree_flat[k].shape[starting_dim:]
         != example_pytree_flat[k].shape[starting_dim:]
     }
-    logging.debug('Mismatched keys:  ', mismatched_keys)
+    logging.debug("Mismatched keys:  ", mismatched_keys)
     SPECTRO_KEY = ("spectro",)
-    if SPECTRO_KEY in mismatched_keys: 
+    if SPECTRO_KEY in mismatched_keys:
         spectro_batch_shape = pytree_flat[SPECTRO_KEY].shape[starting_dim:]
         spectro_example_shape = example_pytree_flat[SPECTRO_KEY].shape[starting_dim:]
-        if len(spectro_batch_shape) == len(spectro_example_shape) - 1 and spectro_batch_shape + (1,) == spectro_example_shape: 
+        if (
+            len(spectro_batch_shape) == len(spectro_example_shape) - 1
+            and spectro_batch_shape + (1,) == spectro_example_shape
+        ):
             del mismatched_keys[SPECTRO_KEY]
     if mismatched_keys:
         if not silent:
@@ -602,29 +605,32 @@ def _verify_shapes(
     if raise_error and (fail or (weak_fail and strict)):
         MAX_KEY_LEN = 15
         INDENT_SIZE = MAX_KEY_LEN + 4
-        INDENT = ''.join([' ' for _ in range(INDENT_SIZE)])
-        def recursive_dict_print(dictionary, prefix=""): 
+        INDENT = "".join([" " for _ in range(INDENT_SIZE)])
+
+        def recursive_dict_print(dictionary, prefix=""):
             lines = []
-            def helper(dic, prefix=""): 
-                for key, val in dic.items(): 
+
+            def helper(dic, prefix=""):
+                for key, val in dic.items():
                     key = key[:MAX_KEY_LEN]
-                    if isinstance(val, dict): 
-                        lines.append(f'{prefix}{key}')
+                    if isinstance(val, dict):
+                        lines.append(f"{prefix}{key}")
                         new_prefix = prefix + INDENT
                         helper(val, new_prefix)
-                    else: 
-                        indent = ''.join([' ' for _ in range(INDENT_SIZE - len(key))])
-                        lines.append(f'{prefix}{key}:{indent}{val.shape}')
+                    else:
+                        indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
+                        lines.append(f"{prefix}{key}:{indent}{val.shape}")
+
             helper(dictionary, prefix=prefix)
             return lines
 
         error_output = []
-        error_output.append('Received pytree:')
+        error_output.append("Received pytree:")
         error_output.extend(recursive_dict_print(pytree))
         error_output.append("#######################")
         error_output.append("example pytree:")
         error_output.extend(example_pytree)
-        logging.error('\n'.join(error_output))
+        logging.error("\n".join(error_output))
         raise AssertionError(f"{name} does not match example batch.")
 
     return weak_fail or fail

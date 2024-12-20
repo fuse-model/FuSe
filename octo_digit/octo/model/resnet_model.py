@@ -1,82 +1,86 @@
 from functools import partial
 import json
 import logging
-from typing import Any, Optional, Tuple, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import flax
 from flax import struct
+import flax.linen as nn
 from flax.training import orbax_utils
 import jax
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 import numpy as np
-import orbax.checkpoint
-import tensorflow as tf
-import flax.linen as nn
-
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.components.action_heads import ActionHead
+from octo.model.components.vit_encoders import StdConv, ViTResnet
 from octo.model.octo_module import OctoModule
 from octo.utils.spec import ModuleSpec
-from octo.utils.typing import Config, Data, Params, PRNGKey, Perturbations, Sequence
-from octo.model.components.vit_encoders import StdConv, ViTResnet
+from octo.utils.typing import Config, Data, Params, Perturbations, PRNGKey, Sequence
+import orbax.checkpoint
+import tensorflow as tf
 
-class ResnetModule(nn.Module): 
+
+class ResnetModule(nn.Module):
     mlp_widths: tuple[int]
     image_embedding_size: int
     image_encoder_stages: Sequence[tuple[str, tuple]]
-    language_key: Optional[str] = "language_instruction",
-    action_dim: int = 7, 
-    action_pred_horizon: int = 1, 
+    language_key: Optional[str] = ("language_instruction",)
+    action_dim: int = (7,)
+    action_pred_horizon: int = (1,)
 
     @nn.compact
     def __call__(
-        self, 
+        self,
         observations,
-        tasks, 
-    ): 
+        tasks,
+    ):
         # observations = batch['observation']
         b, w = observations[self.image_encoder_stages[0][0]].shape[:2]
         embeddings = []
-        for observation_key, encoder_stages in self.image_encoder_stages: 
-            embedding = ViTResnet(num_layers=encoder_stages)(observations[observation_key])
-            embedding = StdConv(
-                self.image_embedding_size, 
-                (3, 3)
-            )(embedding) 
-            embedding = jnp.mean(embedding, axis = (-2, -3)) # GAP
+        for observation_key, encoder_stages in self.image_encoder_stages:
+            embedding = ViTResnet(num_layers=encoder_stages)(
+                observations[observation_key]
+            )
+            embedding = StdConv(self.image_embedding_size, (3, 3))(embedding)
+            embedding = jnp.mean(embedding, axis=(-2, -3))  # GAP
             embeddings.append(embedding)
-        
-        lang = jnp.tile(tasks[self.language_key][:, None, ...], (1, w, 1)) # repeat task embedding over window: b, w, dim 
+
+        lang = jnp.tile(
+            tasks[self.language_key][:, None, ...], (1, w, 1)
+        )  # repeat task embedding over window: b, w, dim
         embeddings.append(lang)
         x = jnp.concatenate(embeddings, axis=-1)
-        for width in self.mlp_widths: 
+        for width in self.mlp_widths:
             x = nn.Dense(width)(x)
-        x = nn.Dense(self.action_dim * self.action_pred_horizon)(x) 
+        x = nn.Dense(self.action_dim * self.action_pred_horizon)(x)
         x = jnp.reshape(x, (b, w, self.action_pred_horizon, self.action_dim))
-        return x 
+        return x
 
     @classmethod
     def create(
         cls,
-        mlp_widths: tuple[int], 
+        mlp_widths: tuple[int],
         image_embedding_size: int,
         image_encoder_stages: Optional[Sequence[tuple[str, tuple]]] = None,
         language_key: Optional[str] = "language_instruction",
-        action_dim: int = 7, 
-        action_pred_horizon: int = 1, 
+        action_dim: int = 7,
+        action_pred_horizon: int = 1,
     ) -> "OctoModule":
-    
-        if image_encoder_stages is None: 
-           image_encoder_stages = (("image_primary", (2, 2, 2, 2)), ("image_wrist", (2, 2, 2, 2))) 
+
+        if image_encoder_stages is None:
+            image_encoder_stages = (
+                ("image_primary", (2, 2, 2, 2)),
+                ("image_wrist", (2, 2, 2, 2)),
+            )
 
         return cls(
-            mlp_widths, 
+            mlp_widths,
             image_embedding_size,
             image_encoder_stages,
             language_key,
-            action_dim, 
+            action_dim,
             action_pred_horizon,
         )
 
@@ -91,10 +95,8 @@ class ResnetModel:
     example_batch: Data
     dataset_statistics: Optional[Data]
 
-    def create_tasks(
-        self, texts: Sequence[str] = None
-    ):
-        tasks = {} 
+    def create_tasks(self, texts: Sequence[str] = None):
+        tasks = {}
 
         assert self.text_processor is not None
         tasks["language_instruction"] = texts
@@ -105,10 +107,9 @@ class ResnetModel:
         tasks["language_instruction"] = self.text_processor.encode(
             tasks["language_instruction"]
         )
-            
+
         _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
         return tasks
-
 
     @partial(jax.jit, static_argnames=())
     def run_resnet(
@@ -116,7 +117,7 @@ class ResnetModel:
         observations: Data,
         tasks: Data,
     ):
-        
+
         # print('hi')
         # _verify_shapes(
         #     observations,
@@ -134,21 +135,16 @@ class ResnetModel:
         )
         _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
 
-        params_kwargs = { 
-            "params": params, 
-            "perturbations": perturbations
-        }
+        params_kwargs = {"params": params, "perturbations": perturbations}
         return self.module.apply(
-            {"params": self.params},
-            observations,
-            tasks,
-            method="self"
+            {"params": self.params}, observations, tasks, method="self"
         )
+
     @partial(jax.jit, static_argnames=())
     def sample_actions(
         self,
         observations: Data,
-        tasks: Data,  
+        tasks: Data,
         unnormalization_statistics: Optional[Data] = None,
     ):
         # print("here")
@@ -176,9 +172,8 @@ class ResnetModel:
         cls,
         checkpoint_path: str,
         text_processor: TextProcessor,
-        dataset_statistics, 
+        dataset_statistics,
         step: Optional[int] = None,
-        
     ) -> "ResnetModel":
         """Loads a model from a checkpoint that was saved via `save_pretrained`.
 
@@ -225,12 +220,10 @@ class ResnetModel:
         module = ResnetModule.create(**config["model"])
         # infer params shape without actually doing any computation
 
-
-        init_args = (
-            example_batch['observation'],
-            example_batch['task']
+        init_args = (example_batch["observation"], example_batch["task"])
+        perturbations = module.init(jax.random.PRNGKey(0), *init_args).get(
+            "perturbations", None
         )
-        perturbations = module.init(jax.random.PRNGKey(0), *init_args).get('perturbations', None)
         params_shape = jax.eval_shape(
             partial(module.init), jax.random.PRNGKey(0), *init_args
         )["params"]
@@ -333,10 +326,7 @@ class ResnetModel:
         example_batch = multihost_utils.process_allgather(example_batch)
         example_batch = jax.tree_map(lambda x: x[:1], example_batch)
 
-        init_args = (
-            example_batch['observation'],
-            example_batch['task']
-        )
+        init_args = (example_batch["observation"], example_batch["task"])
 
         if verbose:
             print(
@@ -349,8 +339,8 @@ class ResnetModel:
 
         variables = _init(rng)
         params = variables["params"]
-        perturbations = variables.get('perturbations', None)
-        
+        perturbations = variables.get("perturbations", None)
+
         return cls(
             module=module,
             params=params,
@@ -418,8 +408,6 @@ def _verify_shapes(
     return weak_fail or fail
 
 
-
-
 SPEC_TEMPLATE = """
 This model is trained with a window size of {window_size}, predicting {action_dim} dimensional actions {action_horizon} steps into the future.
 Observations and tasks conform to the following spec:
@@ -453,61 +441,61 @@ At inference, you may pass in any subset of these observation and task keys, wit
 # from octo.utils.typing import Config, Data, Params, PRNGKey, Perturbations, Sequence
 # from octo.model.components.vit_encoders import StdConv, ViTResnet
 
-# class ResnetModule(nn.Module): 
+# class ResnetModule(nn.Module):
 #     mlp_widths: tuple[int]
 #     image_embedding_size: int
 #     image_encoder_stages: Sequence[tuple[str, tuple]]
 #     language_key: Optional[str] = "language_instruction",
-#     action_dim: int = 7, 
-#     action_pred_horizon: int = 1, 
+#     action_dim: int = 7,
+#     action_pred_horizon: int = 1,
 
 #     @nn.compact
 #     def __call__(
-#         self, 
-#         batch: Data, 
-#     ): 
+#         self,
+#         batch: Data,
+#     ):
 #         observations = batch['observation']
 #         b, w = observations[self.image_encoder_stages[0][0]].shape[:2]
 #         embeddings = []
-#         for observation_key, encoder_stages in self.image_encoder_stages: 
+#         for observation_key, encoder_stages in self.image_encoder_stages:
 #             embedding = ViTResnet(num_layers=encoder_stages)(observations[observation_key])
 #             embedding = StdConv(
-#                 self.image_embedding_size, 
+#                 self.image_embedding_size,
 #                 (3, 3)
-#             )(embedding) 
+#             )(embedding)
 #             embedding = jnp.mean(embedding, axis = (-2, -3)) # GAP
 #             embeddings.append(embedding)
-        
+
 #         lang = jnp.tile(batch['task'][self.language_key][:, None, ...], (1, w, 1)) # repeat task embedding over window
 #         embeddings.append(lang)
 #         x = jnp.concatenate(embeddings, axis=-1)
 #         x = jnp.reshape(b, -1)
-#         for width in self.mlp_widths: 
+#         for width in self.mlp_widths:
 #             x = nn.Dense(width)(x)
-#         x = nn.Dense(self.action_dim * self.action_pred_horizon)(x) 
+#         x = nn.Dense(self.action_dim * self.action_pred_horizon)(x)
 #         x = jnp.reshape(x, (-1, self.action_pred_horizon, self.action_dim))
-#         return x 
+#         return x
 
 #     @classmethod
 #     def create(
 #         cls,
-#         mlp_widths: tuple[int], 
+#         mlp_widths: tuple[int],
 #         image_embedding_size: int,
 #         image_encoder_stages: Optional[Sequence[tuple[str, tuple]]] = None,
 #         language_key: Optional[str] = "language_instruction",
-#         action_dim: int = 7, 
-#         action_pred_horizon: int = 1, 
+#         action_dim: int = 7,
+#         action_pred_horizon: int = 1,
 #     ) -> "OctoModule":
 
-#         if image_encoder_stages is None: 
-#            image_encoder_stages = (("image_primary", (2, 2, 2, 2)), ("image_wrist", (2, 2, 2, 2))) 
+#         if image_encoder_stages is None:
+#            image_encoder_stages = (("image_primary", (2, 2, 2, 2)), ("image_wrist", (2, 2, 2, 2)))
 
 #         return cls(
-#             mlp_widths, 
+#             mlp_widths,
 #             image_embedding_size,
 #             image_encoder_stages,
 #             language_key,
-#             action_dim, 
+#             action_dim,
 #             action_pred_horizon,
 #         )
 
@@ -525,7 +513,7 @@ At inference, you may pass in any subset of these observation and task keys, wit
 #     def create_tasks(
 #         self, texts: Sequence[str] = None
 #     ):
-#         tasks = {} 
+#         tasks = {}
 
 #         assert self.text_processor is not None
 #         tasks["language_instruction"] = texts
@@ -536,7 +524,7 @@ At inference, you may pass in any subset of these observation and task keys, wit
 #         tasks["language_instruction"] = self.text_processor.encode(
 #             tasks["language_instruction"]
 #         )
-            
+
 #         _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
 #         return tasks
 
@@ -766,7 +754,7 @@ At inference, you may pass in any subset of these observation and task keys, wit
 #         variables = _init(rng)
 #         params = variables["params"]
 #         perturbations = variables.get('perturbations', None)
-        
+
 #         return cls(
 #             module=module,
 #             params=params,
@@ -832,8 +820,6 @@ At inference, you may pass in any subset of these observation and task keys, wit
 #         raise AssertionError(f"{name} does not match example batch.")
 
 #     return weak_fail or fail
-
-
 
 
 # SPEC_TEMPLATE = """

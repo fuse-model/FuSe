@@ -1,11 +1,8 @@
+from typing import Any, Dict
+
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
-
-from octo.data.utils.data_utils import (
-    binarize_gripper_actions,
-    relabel_actions,
-)
-from typing import Dict, Any
+from octo.data.utils.data_utils import binarize_gripper_actions, relabel_actions
 import tensorflow as tf
 
 
@@ -22,9 +19,7 @@ def viper_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][
         :, -1:
     ]
-    trajectory["language_instruction"] = trajectory[
-        "language_text"
-    ]
+    trajectory["language_instruction"] = trajectory["language_text"]
     print(trajectory["observation"]["image_primary"])
     return trajectory
 
@@ -189,4 +184,3 @@ def get_config(config_string="full,multimodal"):
     config["traj_transform_kwargs"] = traj_transform_kwargs
     config["frame_transform_kwargs"] = frame_transform_kwargs
     return ConfigDict(config)
-    

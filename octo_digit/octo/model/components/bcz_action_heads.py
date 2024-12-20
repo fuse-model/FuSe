@@ -9,18 +9,16 @@ import jax
 from jax import Array
 import jax.numpy as jnp
 from jax.typing import ArrayLike
-
+from octo.model.components.action_heads import masked_mean
 from octo.model.components.base import TokenGroup
 from octo.model.components.diffusion import cosine_beta_schedule, create_diffusion_model
 from octo.model.components.tokenizers import BinTokenizer
 from octo.model.components.transformer import MAPHead
 from octo.model.components.unet import ConditionalUnet1D, unet_squaredcos_cap_v2
 from octo.utils.typing import PRNGKey
-from octo.model.components.action_heads import masked_mean
 
 
 class BczActionHead(ABC):
-
     @abstractmethod
     def loss(
         self,
@@ -40,7 +38,7 @@ class BczActionHead(ABC):
         sample_shape: Tuple[int, ...] = (),
         rng: Optional[PRNGKey] = None,
         embodiment_action_dim: Optional[int] = None,
-        train: bool = True
+        train: bool = True,
     ) -> Array:
         """Predict the action for the last timestep in the window. Returns shape
         (*sample_shape, batch_size, action_horizon, action_dim).
@@ -53,7 +51,7 @@ def continuous_loss(
     ground_truth_value: ArrayLike,
     mask: ArrayLike,
     loss_type: str = "mse",
-    huber_delta: float = 1.0
+    huber_delta: float = 1.0,
 ) -> Array:
     """
     Args:
@@ -63,7 +61,7 @@ def continuous_loss(
     """
     if loss_type == "mse":
         loss = jnp.square(pred_value - ground_truth_value)
-    elif loss_type == "huber": 
+    elif loss_type == "huber":
         diff = jnp.abs(pred_value - ground_truth_value)
         mse_loss = jnp.square(pred_value - ground_truth_value)
         outlier_loss = 2 * huber_delta * (diff - 0.5 * huber_delta)
@@ -89,12 +87,10 @@ class BczContinuousActionHead(nn.Module, BczActionHead):
     action_dim: int = 7
     max_action: float = 5.0
     loss_type: str = "mse"
-    
+
     @nn.compact
-    def __call__(
-        self, encoded_features: ArrayLike, train: bool = True
-    ) -> jax.Array:
-        
+    def __call__(self, encoded_features: ArrayLike, train: bool = True) -> jax.Array:
+
         features = nn.Dense(self.hidden_width)(encoded_features)
         features = nn.relu(features)
         features = nn.Dense(self.hidden_width)(features)
@@ -112,7 +108,7 @@ class BczContinuousActionHead(nn.Module, BczActionHead):
         actions: ArrayLike,
         timestep_pad_mask: ArrayLike,
         action_pad_mask: ArrayLike,
-        train: bool = True
+        train: bool = True,
     ) -> Tuple[Array, Dict[str, Array]]:
         """Computes the loss for the action regression objective.
 
@@ -144,7 +140,7 @@ class BczContinuousActionHead(nn.Module, BczActionHead):
         encoded_features,
         *args,
         sample_shape: tuple = (),
-        train: bool = True, 
+        train: bool = True,
         **kwargs,
     ) -> jax.Array:
         """Convenience methods for predicting actions for the final timestep in the window."""
@@ -152,10 +148,12 @@ class BczContinuousActionHead(nn.Module, BczActionHead):
         mean = self(encoded_features)[:, -1]
         return jnp.broadcast_to(mean, sample_shape + mean.shape)
 
+
 class MSEBczActionHead(BczContinuousActionHead):
     max_action: float = 5.0
     loss_type: str = "mse"
 
-class HuberBczActionHead(BczContinuousActionHead): 
+
+class HuberBczActionHead(BczContinuousActionHead):
     max_action: float = 5.0
     loss_type: str = "huber"

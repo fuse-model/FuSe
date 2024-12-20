@@ -103,7 +103,7 @@ def decode_and_resize(
     obs: dict,
     resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]],
     depth_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]],
-    digit_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]]
+    digit_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]],
 ) -> dict:
     """Decodes images and depth images, and then optionally resizes them."""
     # just gets the part after "image_" or "depth_" or "digit_"
@@ -127,11 +127,15 @@ def decode_and_resize(
             )
         image = obs[f"image_{name}"]
         # target_dtype = tf.int16 if "digit" in name else tf.uint8 # need negative numbers for background subtraction
-        target_dtype = tf.uint8 # TODO: figure out if there is an easy way to handle negatives from subtraction without changing dlimp
+        target_dtype = (
+            tf.uint8
+        )  # TODO: figure out if there is an easy way to handle negatives from subtraction without changing dlimp
         if image.dtype == tf.string:
             if tf.strings.length(image) == 0:
                 # this is a padding image
-                image = tf.zeros((*resize_size.get(name, (1, 1)), 3), dtype=target_dtype)
+                image = tf.zeros(
+                    (*resize_size.get(name, (1, 1)), 3), dtype=target_dtype
+                )
             else:
                 image = tf.io.decode_image(
                     image, expand_animations=False, dtype=target_dtype
@@ -170,11 +174,11 @@ def decode_and_resize(
                 depth, size=depth_resize_size[name]
             )
         obs[f"depth_{name}"] = depth
-    
+
     for name in digit_names:
         print(digit_names)
         raise NotImplementedError
-        # assert False, digit_names # do we ever get here? 
+        # assert False, digit_names # do we ever get here?
         # if name not in digit_resize_size:
         #     logging.warning(
         #         f"No resize_size was provided for digit_{name}. This will result in 1x1 "
@@ -187,7 +191,7 @@ def decode_and_resize(
         #         image = tf.zeros((*resize_size.get(name, (1, 1)), 3), dtype=tf.int16)
         #     else:
         #         image = tf.io.decode_image(
-        #             image, expand_animations=False, dtype=tf.int16 # need 
+        #             image, expand_animations=False, dtype=tf.int16 # need
         #         )
         # elif image.dtype != tf.uint8:
         #     raise ValueError(
@@ -202,10 +206,12 @@ def decode_and_resize(
 
 def background_subtraction(
     frame: dict,
-    background_subtraction_map: dict = {}, 
-) -> dict: 
-    obs: dict = frame['observation']
-    for obs_key, background_key in background_subtraction_map.items(): 
-        obs[obs_key] = tf.cast(obs[obs_key], tf.int16) - tf.cast(obs[background_key], tf.int16)
-    frame['observation'] = obs 
-    return frame 
+    background_subtraction_map: dict = {},
+) -> dict:
+    obs: dict = frame["observation"]
+    for obs_key, background_key in background_subtraction_map.items():
+        obs[obs_key] = tf.cast(obs[obs_key], tf.int16) - tf.cast(
+            obs[background_key], tf.int16
+        )
+    frame["observation"] = obs
+    return frame
