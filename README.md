@@ -61,7 +61,7 @@ python octo_digit/eval/fuse_eval.py --checkpoint_weights_path=ckpt.pth
 ```
 For PaliVLA:
 ```bash
-python palivla_digit/fuse_eval.py --checkpoint_dir=ckpt.pth
+python palivla_digit/eval_palivla.py --checkpoint_dir=ckpt.pth
 ```
 
 # License
