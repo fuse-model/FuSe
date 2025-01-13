@@ -71,10 +71,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Citation
 
 ```bibtex
-@article{jones24fuse,
+@article{jones2025fuse,
   title={Beyond Sight: Finetuning Generalist Robot Policies with Heterogeneous Sensors via Language Grounding},
-  author={Joshua Jones and Oier Mees and Carmelo Sferrazza and Kyle Stachowicz and Pieter Abbeel and Sergey Levine},
-  journal={arXiv preprint arXiv:foo}
-  year={2024}
+  author={Jones, Joshua and Mees, Oier and Sferrazza, Carmelo and Stachowicz, Kyle and Abbeel, Pieter and Levine, Sergey},
+  journal={arXiv preprint arXiv:2501.04693},
+  year={2025}
 }
 ```
