@@ -7,5 +7,5 @@ wandb/
 *.egg-info
 
 /trained_tokenizers
-/models
 /checkpoints
+models

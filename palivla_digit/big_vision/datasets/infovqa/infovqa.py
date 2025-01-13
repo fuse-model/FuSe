@@ -53,6 +53,7 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
+
 _DESCRIPTION = """InfographicVQA dataset."""
 
 # pylint: disable=line-too-long
@@ -70,75 +71,71 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 # When running locally (recommended), copy files as above an use these:
-_INFOVQA_PATH = "/tmp/data/infovqa/"
+_INFOVQA_PATH = '/tmp/data/infovqa/'
 _ANNOTATIONS = {
-    "train": "infographicsVQA_train_v1.0.json",
-    "val": "infographicsVQA_val_v1.0_withQT.json",
-    "test": "infographicsVQA_test_v1.0.json",
-}
+    'train': 'infographicsVQA_train_v1.0.json',
+    'val': 'infographicsVQA_val_v1.0_withQT.json',
+    'test': 'infographicsVQA_test_v1.0.json',
+    }
 
 
 class Infovqa(tfds.core.GeneratorBasedBuilder):
-    """DatasetBuilder for infovqa dataset."""
+  """DatasetBuilder for infovqa dataset."""
 
-    VERSION = tfds.core.Version("1.1.0")
-    RELEASE_NOTES = {
-        "1.0.0": "First release.",
-        "1.1.0": "Add multi-span permutations to the val split answers.",
-    }
+  VERSION = tfds.core.Version('1.1.0')
+  RELEASE_NOTES = {
+      '1.0.0': 'First release.',
+      '1.1.0': 'Add multi-span permutations to the val split answers.',
+      }
 
-    def _info(self):
-        """Returns the metadata."""
+  def _info(self):
+    """Returns the metadata."""
 
-        return tfds.core.DatasetInfo(
-            builder=self,
-            description=_DESCRIPTION,
-            features=tfds.features.FeaturesDict(
-                {
-                    "question_id": tfds.features.Scalar(np.int32),
-                    "filename": tfds.features.Text(),
-                    "image": tfds.features.Image(encoding_format="jpeg"),
-                    "question": tfds.features.Text(),
-                    "answers": tfds.features.Sequence(tfds.features.Text()),
-                }
-            ),
-            supervised_keys=None,
-            homepage="https://www.docvqa.org/datasets/infographicvqa",
-            citation=_CITATION,
-        )
+    return tfds.core.DatasetInfo(
+        builder=self,
+        description=_DESCRIPTION,
+        features=tfds.features.FeaturesDict({
+            'question_id': tfds.features.Scalar(np.int32),
+            'filename': tfds.features.Text(),
+            'image': tfds.features.Image(encoding_format='jpeg'),
+            'question': tfds.features.Text(),
+            'answers': tfds.features.Sequence(tfds.features.Text()),
+        }),
+        supervised_keys=None,
+        homepage='https://www.docvqa.org/datasets/infographicvqa',
+        citation=_CITATION,
+    )
 
-    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-        """Returns SplitGenerators."""
-        return {
-            split: self._generate_examples(split) for split in ("train", "val", "test")
-        }
+  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+    """Returns SplitGenerators."""
+    return {split: self._generate_examples(split)
+            for split in ('train', 'val', 'test')}
 
-    def _generate_examples(self, split):
-        """Yields (key, example) tuples from test set."""
-        annot_fname = os.path.join(_INFOVQA_PATH, _ANNOTATIONS[split])
-        with open(annot_fname, "r") as f:
-            data = json.loads(f.read())
+  def _generate_examples(self, split):
+    """Yields (key, example) tuples from test set."""
+    annot_fname = os.path.join(_INFOVQA_PATH, _ANNOTATIONS[split])
+    with open(annot_fname, 'r') as f:
+      data = json.loads(f.read())
 
-        for x in data["data"]:
-            yield x["questionId"], {
-                "question_id": x["questionId"],
-                "filename": x["image_local_name"],
-                "image": os.path.join(_INFOVQA_PATH, "images", x["image_local_name"]),
-                "question": x["question"],
-                "answers": maybe_permute(x.get("answers", []), split),
-            }
+    for x in data['data']:
+      yield x['questionId'], {
+          'question_id': x['questionId'],
+          'filename': x['image_local_name'],
+          'image': os.path.join(_INFOVQA_PATH, 'images', x['image_local_name']),
+          'question': x['question'],
+          'answers': maybe_permute(x.get('answers', []), split),
+      }
 
 
 def maybe_permute(answers, split):
-    if split != "val":
-        return answers
-    new_answers = []
-    for x in answers:
-        if ", " in x:  # Create all permutations.
-            # The first element remains the same.
-            new_answers.extend(
-                [", ".join(y) for y in itertools.permutations(x.split(", "))]
-            )
-        else:
-            new_answers.append(x)
-    return new_answers
+  if split != 'val':
+    return answers
+  new_answers = []
+  for x in answers:
+    if ', ' in x:  # Create all permutations.
+      # The first element remains the same.
+      new_answers.extend([', '.join(y)
+                          for y in itertools.permutations(x.split(', '))])
+    else:
+      new_answers.append(x)
+  return new_answers

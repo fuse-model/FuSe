@@ -65,7 +65,7 @@ See below for instructions to train your own models.
 This directory contains configs to train GIVT models as well as VAEs (for the UViM variants).
 For training the ImageNet 2012 VAE models we used a modified version of the [MaskGIT code](https://github.com/google-research/maskgit).
 
-The `big_vision` input pipeline relies on [TensorFlow Datasets (TFDS)](https://www.tensorflow.org/datasets)
+The `big_vision` input pipeline relies on [TensorFlow Datasets (TFDS)](https://www.tensorflow.org/datasets) 
 which supports some data sets out-of-the-box, whereas others require manual download of the data
 (for example ImageNet and COCO (2017), see the `big_vision` [main README](../../../../#cloud-tpu-vm-setup) and the [UViM README](../uvim), respectively, for details).
 

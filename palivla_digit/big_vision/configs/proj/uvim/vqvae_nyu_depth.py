@@ -17,9 +17,9 @@ r"""A config for training a UViM stage I model for the depth task.
 """
 
 import itertools
-
 import big_vision.configs.common as bvcc
 import ml_collections as mlc
+
 
 QUANTIZATION_BINS = 256
 # Depths outside of this range will not be evaluated.

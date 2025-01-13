@@ -2,25 +2,24 @@ from dataclasses import dataclass
 from functools import partial
 import logging
 import os
-from typing import Callable, Iterable, Mapping, Optional, Tuple
+from typing import Callable, Mapping, Optional
 
 import flax
 from flax.training import orbax_utils
 import jax
 import jax.numpy as jnp
-import ml_collections
 import numpy as np
-from octo.data.dataset import make_single_dataset
-from octo.data.utils.text_processing import TextProcessor
-from octo.utils.gradcam import get_overlaid_attention_map, gradCAM
-from octo.utils.train_utils import batched_apply, process_and_save_text, TrainState
-from octo.utils.typing import Any, Data, Sequence
-from octo.utils.visualization_lib import RolloutVisualizer, Visualizer
 import orbax.checkpoint
 import tensorflow as tf
 import tqdm
+import ml_collections
 from wandb.data_types import Table
 
+from octo.data.dataset import make_single_dataset
+from octo.data.utils.text_processing import TextProcessor
+from octo.utils.train_utils import batched_apply, TrainState
+from octo.utils.typing import Any, Data, Sequence
+from octo.utils.visualization_lib import RolloutVisualizer, Visualizer
 
 class Callback:
     def __call__(self, train_state: TrainState, step: int):
@@ -90,26 +89,19 @@ class SaveCallback(Callback):
             cfg = train_state.model.config
             if isinstance(cfg, ml_collections.config_dict.config_dict.ConfigDict):
                 cfg = cfg.to_dict()
-
-            def recursive_checker(dic):
-                for key, val in dic.items():
-                    if isinstance(
-                        val, ml_collections.config_dict.config_dict.ConfigDict
-                    ):
-                        print(
-                            "ERROR:  key was ConfigDict, not dict. Converting to dict",
-                            key,
-                        )
+            def recursive_checker(dic): 
+                for key, val in dic.items(): 
+                    if isinstance(val, ml_collections.config_dict.config_dict.ConfigDict): 
+                        logging.debug("ERROR:  key was ConfigDict, not dict. Converting to dict", key)
                         dic[key] = val.to_dict()
                         recursive_checker(val)
-                    elif isinstance(val, dict):
+                    elif isinstance(val, dict): 
                         recursive_checker(val)
-
+            
             recursive_checker(cfg)
             train_state.model.save_pretrained(
                 step, checkpoint_manager=self.params_checkpointer
             )
-
             self.state_checkpointer.save(
                 step,
                 train_state,
@@ -198,11 +190,9 @@ def get_policy_sampled_actions(
     actions = jnp.moveaxis(actions, 0, 1)
     return actions
 
-
 @dataclass
 class ValidationCallback(Callback):
-    loss_fns: Mapping[str, Callable]
-    lang_modes: Mapping[str, Iterable[str]]
+    loss_fn: Callable
     process_batch_fn: Callable[[Data], Data]
     text_processor: Optional[TextProcessor]
     val_dataset_kwargs_list: Sequence[Mapping[str, Any]]
@@ -227,6 +217,7 @@ class ValidationCallback(Callback):
                 self.dataset_kwargs["frame_transform_kwargs"],
                 train=self.train,
             )
+
             val_iterator = (
                 val_dataset.unbatch()
                 .shuffle(self.val_shuffle_buffer_size)
@@ -236,50 +227,19 @@ class ValidationCallback(Callback):
             )
             val_iterator = map(self.process_batch_fn, val_iterator)
             self.val_iterators[single_dataset_kwargs["name"]] = val_iterator
-        self.loss_fn_partials = []
-        for key, loss_fn in self.loss_fns.items():
-            if key not in self.lang_modes:
-                self.loss_fn_partials.append(loss_fn)
-            else:
-                for lang_key in self.lang_modes[key]:
-                    self.loss_fn_partials.append(
-                        partial(loss_fn, specify_lang_key=lang_key)
-                    )
 
         @partial(
             jax.jit,
             out_shardings=jax.sharding.PositionalSharding(jax.devices()).replicate(),
         )
         def eval_step(state: TrainState, batch: Data):
-
-            loss_fn_partials = [
-                partial(loss_fn, params=state.model.params, rng=state.rng, train=False)
-                for loss_fn in self.loss_fn_partials
-            ]
-            all_tasks = {}
-
-            if "base" in self.modes_to_evaluate:
-                all_tasks["base"] = batch["task"]
-            if "image_conditioned" in self.modes_to_evaluate:
-                all_tasks["image_conditioned"] = remove_text(
-                    batch["task"], self.zero_text
-                )
-            if "text_conditioned" in self.modes_to_evaluate:
-                all_tasks["text_conditioned"] = remove_images(batch["task"])
-
-            if "unconditioned" in self.modes_to_evaluate:
-                all_tasks["unconditioned"] = remove_text(
-                    remove_images(batch["task"]), self.zero_text
-                )
-
-            out = {}
-            i = 0
-            for k, tasks in all_tasks.items():
-                for loss_fn in loss_fn_partials:
-                    out[f"{k}_{i}"] = loss_fn(
-                        batch=flax.core.copy(batch, {"task": tasks})
-                    )[1]
-            return out
+            loss_fn_partial = partial(
+                self.loss_fn,
+                params=state.model.params,
+                rng=state.rng,
+                train=False,
+            )
+            return loss_fn_partial(batch=batch)[1]
 
         self.eval_step = eval_step
 
@@ -297,28 +257,20 @@ class ValidationCallback(Callback):
             wandb_metrics[f"validation_{name}"] = metrics
         return wandb_metrics
 
-
 @dataclass
 class LanguageCallback(Callback):
     get_ids_fn: Callable
     process_batch_fn: Callable[[Data], Data]
-    text_processor: Optional[TextProcessor]
-    val_dataset_kwargs_list: Sequence[Mapping[str, Any]]
+    text_processor: TextProcessor
+    lang_dataset_kwargs_list: Sequence[Mapping[str, Any]]
     dataset_kwargs: Mapping[str, Any]
     val_shuffle_buffer_size: int
     num_val_batches: int
-    modes_to_evaluate: Sequence[str] = ("text_conditioned", "image_conditioned")
     train: bool = False
 
     def __post_init__(self):
-        if self.text_processor is not None:
-            self.zero_text = jax.tree_map(
-                lambda x: x[0], self.text_processor.encode("")
-            )
-        else:
-            self.zero_text = None
         self.val_iterators = {}
-        for single_dataset_kwargs in self.val_dataset_kwargs_list:
+        for single_dataset_kwargs in self.lang_dataset_kwargs_list:
             val_dataset = create_validation_dataset(
                 single_dataset_kwargs,
                 self.dataset_kwargs["traj_transform_kwargs"],
@@ -334,18 +286,13 @@ class LanguageCallback(Callback):
             )
             val_iterator = map(self.process_batch_fn, val_iterator)
             self.val_iterators[single_dataset_kwargs["name"]] = val_iterator
-
+            
         @partial(
             jax.jit,
             out_shardings=jax.sharding.PositionalSharding(jax.devices()).replicate(),
         )
         def eval_step(state: TrainState, batch: Data):
-            get_ids_partial = partial(
-                self.get_ids_fn, params=state.model.params, rng=state.rng, train=False
-            )
-
-            out = get_ids_partial(batch=batch)
-            return out
+            return partial(self.get_ids_fn, model=state.model)(params=state.model.params, rng=state.rng, batch=batch)[1]
 
         self.eval_step = eval_step
 
@@ -361,30 +308,27 @@ class LanguageCallback(Callback):
                 desc=name,
             ):
                 out = self.eval_step(train_state, batch)
-                for k, v in out.items():
+                for k, v in out.items(): 
                     recon_ids, true_ids = v
                     true_ids = np.array(true_ids)
                     recon_ids = np.array(recon_ids)
                     num_correct = np.sum(np.all(recon_ids == true_ids, axis=-1))
                     accuracy = 1.0 * num_correct / len(recon_ids)
                     metrics[k] = accuracy
-                    recon_lang = self.text_processor.decode(
-                        recon_ids[0]
-                    )  # remove batch for examples
+                    
+                    recon_lang = self.text_processor.decode(recon_ids[0])
                     true_lang = self.text_processor.decode(true_ids[0])
                     recon_lang_all.append(recon_lang)
                     true_lang_all.append(true_lang)
-
-            rows = [
-                list(zipped_lang) for zipped_lang in zip(true_lang_all, recon_lang_all)
-            ]
-
+                
+            rows = [list(zipped_lang) for zipped_lang in zip(true_lang_all, recon_lang_all)]
+            
             wandb_metrics[f"gen_{step}"] = Table(
-                columns=["True", "Reconstructed"], data=rows
+                columns=['True', 'Reconstructed'], 
+                data=rows
             )
             wandb_metrics.update(metrics)
         return wandb_metrics
-
 
 @dataclass
 class VisualizationCallback(Callback):
@@ -451,7 +395,6 @@ class VisualizationCallback(Callback):
                     wandb_metrics[f"visualizations_{name}/{mode}"] = images
         return wandb_metrics
 
-
 @dataclass
 class RolloutVisualizationCallback(Callback):
     visualizer_kwargs_list: Sequence[Mapping[str, Any]]
@@ -500,80 +443,4 @@ class RolloutVisualizationCallback(Callback):
                     f"rollouts_{rollout_visualizer.name}/{mode}"
                 ] = rollout_infos
 
-        return wandb_metrics
-
-
-@dataclass
-class GradCAMVisualizationCallback(Callback):
-    text_processor: TextProcessor
-    val_dataset_kwargs_list: Sequence[Mapping[str, Any]]
-    dataset_kwargs: Mapping[str, Any]
-    eval_batch_size: int
-    shuffle_buffer_size: int
-    train: bool = False
-    gradcam_kwargs_list: Sequence[Tuple[str, Mapping[str, str | int]]] = None
-
-    def __post_init__(self):
-        if self.gradcam_kwargs_list is None:
-            self.gradcam_kwargs_list = (
-                ("obs_primary", {"psuedo_loss_type": "loss"}),
-                ("obs_wrist", {"psuedo_loss_type": "loss"}),
-            )
-
-        def process_batch(batch):
-            batch = process_and_save_text(batch, self.text_processor)
-            del batch["dataset_name"]
-            return batch
-
-        self.datasets = []
-        for single_dataset_kwargs in self.val_dataset_kwargs_list:
-            val_dataset = create_validation_dataset(
-                single_dataset_kwargs,
-                self.dataset_kwargs["traj_transform_kwargs"],
-                self.dataset_kwargs["frame_transform_kwargs"],
-                train=self.train,
-            )
-            val_data_iter = (
-                val_dataset.repeat()
-                .unbatch()
-                .shuffle(self.shuffle_buffer_size)
-                .batch(self.eval_batch_size)
-                .iterator()
-            )
-            val_data_iter = map(process_batch, val_data_iter)
-            self.datasets.append(val_data_iter)
-
-    def __call__(self, train_state: TrainState, step: int):
-        wandb_metrics = {}
-        rng, dropout_rng = jax.random.split(train_state.rng)
-        for i, dataset in enumerate(self.datasets):
-            batch = next(dataset)
-            for (obs_key, psuedo_loss_kwargs) in self.gradcam_kwargs_list:
-                original_image, resized_gradcam = gradCAM(
-                    train_state.model,
-                    train_state.model.params,
-                    train_state.model.perturbations,
-                    obs_key,
-                    batch,
-                    dropout_rng,
-                    rng=rng,
-                    **psuedo_loss_kwargs,
-                )
-                if psuedo_loss_kwargs["psuedo_loss_type"] == "loss":
-                    psuedo_loss_suffix = "mse"
-                else:
-                    psuedo_loss_suffix = f"pred_{psuedo_loss_kwargs['pred_horizon_step']}_{psuedo_loss_kwargs['action_dim']}"
-
-                wandb_name = (
-                    f"gradcam_{i}/{obs_key.replace('obs_', '')}_{psuedo_loss_suffix}"
-                )
-
-                overlaid_heatmap = get_overlaid_attention_map(
-                    original_image, resized_gradcam
-                )
-                wandb_metrics[f"{wandb_name}/img"] = original_image
-                wandb_metrics[f"{wandb_name}/gradcam"] = overlaid_heatmap
-                wandb_metrics[f"{wandb_name}/command"] = batch[
-                    "natural_language_instruction"
-                ]
         return wandb_metrics

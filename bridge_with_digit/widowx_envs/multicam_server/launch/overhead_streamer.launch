@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="node_name" default="overhead_streamer" />
+
+    <node pkg="multicam_server" type="overhead_streamer.py" name="$(arg node_name)" output="screen" >
+        <param name="name" type="string" value="$(arg node_name)" /> 
+    </node>
+</launch>

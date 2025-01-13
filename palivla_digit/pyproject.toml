@@ -3,36 +3,95 @@ name = "big-vision"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "big-vision",
+    "tqdm>=4.60.0",
+    "absl-py>=0.12.0",
+    "imageio>=2.31.1",
+    "moviepy>=1.0.3",
     "chex>=0.1.86",
     "distrax>=0.1.5",
-    "dlimp",
+    "dlimp@git+https://github.com/kvablack/dlimp.git",
     "einops>=0.8.0",
     "flax>=0.9.0",
     "ipykernel",
-    "jax[cuda12]>=0.4.33",
+    "jax>=0.4.34",
     "matplotlib>=3.9.2",
     "ml-collections>=0.1.1",
     "numpy<2.0.0",
-    "octo",
     "optax>=0.2.3",
     "orbax-checkpoint>=0.7.0",
-    "orbax>=0.1.9",
     "overrides>=7.7.0",
     "pip",
     "scalax>=0.2.4",
     "scikit-learn>=1.5.2",
     "scipy>=1.14.1",
-    "sentencepiece>=0.2.0",
-    "tensorflow-datasets>=4.9.6",
-    "tensorflow-text-nightly>=2.19.0.dev20241014",
-    "tf-nightly>=2.19.0.dev20241014",
+    "tensorflow-probability>=0.24.0",
+    "plotly>=5.16.1",
+    "tfds-nightly>=4.9.0",
+    "tf-nightly>=2.15.0",
+    "tensorflow-text-nightly>=2.15.0",
+    "tensorflow_hub>=0.14.0",
+    "tensorflow_graphics",
     "wandb>=0.18.3",
+    "protobuf>=3.20",
+    "huggingface-hub>=0.27.0",
+    "transformers>=4.47.1",
+    "prettytable>=3.12.0",
+    "funcsigs",
+    "opencv-python",
+    "pyquaternion",
+    "librosa",
+    "edgeml @ git+https://github.com/youliangtan/edgeml.git",
+    "gym>=0.26",
+    "jax-smi",
+    "octo",
+    "eval",
 ]
 
+[project.optional-dependencies]
+tpu = [
+    "jax[tpu]>=0.4.34",
+    "libtpu-nightly",
+]
+gpu = [
+    "jax[cuda12]==0.4.34"
+]
+
+[tool.uv]
+find-links = ["https://storage.googleapis.com/jax-releases/libtpu_releases.html", "https://pypi.org/simple/tf-nightly/"]
+
+prerelease = "allow"
+conflicts = [
+    [
+        { extra = "tpu" },
+        { extra = "gpu" },
+    ],
+]
+override-dependencies = [
+    # Always use tf-nightly and tfds-nightly instead of tensorflow and tensorflow_datasets
+    "tensorflow ; sys_platform == 'never'",
+    "tensorflow_datasets ; sys_platform == 'never'",
+    "scipy>=1.14.1",
+    "jax>=0.4.34",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ipywidgets>=8.1.5",
+    "isort>=6.0.0b2",
+    "ruff>=0.8.4",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.uv.sources]
-dlimp = { path = "dlimp", editable = true }
-octo = { path = "orca", editable = true }
 big-vision = { workspace = true }
+octo = { path = "../octo_digit/octo", editable = true }
+eval = { path = "../octo_digit/eval", editable = true }

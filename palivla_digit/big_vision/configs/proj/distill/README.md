@@ -22,7 +22,7 @@ row of Table1.
 
 We release both student and teacher models:
 
-| Model      | Download link | Resolution  | ImageNet top-1 acc. (paper) |
+| Model      | Download link | Resolution  | ImageNet top-1 acc. (paper) | 
 | :---       | :---:         | :---:       |  :---:                      |
 | BiT-R50x1  | [link](https://storage.googleapis.com/bit_models/distill/R50x1_160.npz)      | 160 |  80.5 |
 | BiT-R50x1  | [link](https://storage.googleapis.com/bit_models/distill/R50x1_224.npz)      | 224 |  82.8 |

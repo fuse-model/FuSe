@@ -14,7 +14,9 @@
 
 """Tests for builder."""
 
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 from big_vision.pp import builder
 from big_vision.pp import ops_general  # pylint: disable=unused-import
@@ -24,47 +26,47 @@ import tensorflow.compat.v1 as tf
 
 
 class BuilderTest(tf.test.TestCase):
-    def testSingle(self):
-        pp_fn = builder.get_preprocess_fn("resize(256)")
-        x = np.random.randint(0, 256, [640, 480, 3])
-        image = pp_fn({"image": x})["image"]
-        self.assertEqual(image.numpy().shape, (256, 256, 3))
 
-    def testEmpty(self):
-        pp_fn = builder.get_preprocess_fn("||inception_crop|||resize(256)||")
+  def testSingle(self):
+    pp_fn = builder.get_preprocess_fn("resize(256)")
+    x = np.random.randint(0, 256, [640, 480, 3])
+    image = pp_fn({"image": x})["image"]
+    self.assertEqual(image.numpy().shape, (256, 256, 3))
 
-        # Typical image input
-        x = np.random.randint(0, 256, [640, 480, 3])
-        image = pp_fn({"image": x})["image"]
-        self.assertEqual(image.numpy().shape, (256, 256, 3))
+  def testEmpty(self):
+    pp_fn = builder.get_preprocess_fn("||inception_crop|||resize(256)||")
 
-    def testPreprocessingPipeline(self):
-        pp_str = (
-            "inception_crop|resize(256)|resize((256, 256))|"
-            "central_crop((80, 120))|flip_lr|value_range(0,1)|"
-            "value_range(-1,1)"
-        )
-        pp_fn = builder.get_preprocess_fn(pp_str)
+    # Typical image input
+    x = np.random.randint(0, 256, [640, 480, 3])
+    image = pp_fn({"image": x})["image"]
+    self.assertEqual(image.numpy().shape, (256, 256, 3))
 
-        # Typical image input
-        x = np.random.randint(0, 256, [640, 480, 3])
-        image = pp_fn({"image": x})["image"]
-        self.assertEqual(image.numpy().shape, (80, 120, 3))
-        self.assertLessEqual(np.max(image.numpy()), 1)
-        self.assertGreaterEqual(np.min(image.numpy()), -1)
+  def testPreprocessingPipeline(self):
+    pp_str = ("inception_crop|resize(256)|resize((256, 256))|"
+              "central_crop((80, 120))|flip_lr|value_range(0,1)|"
+              "value_range(-1,1)")
+    pp_fn = builder.get_preprocess_fn(pp_str)
 
-    def testNumArgsException(self):
+    # Typical image input
+    x = np.random.randint(0, 256, [640, 480, 3])
+    image = pp_fn({"image": x})["image"]
+    self.assertEqual(image.numpy().shape, (80, 120, 3))
+    self.assertLessEqual(np.max(image.numpy()), 1)
+    self.assertGreaterEqual(np.min(image.numpy()), -1)
 
-        x = np.random.randint(0, 256, [640, 480, 3])
-        for pp_str in [
-            "inception_crop(1)",
-            "resize()",
-            "resize(1, 1, 1)" "flip_lr(1)",
-            "central_crop()",
-        ]:
-            with self.assertRaises(BaseException):
-                builder.get_preprocess_fn(pp_str)(x)
+  def testNumArgsException(self):
+
+    x = np.random.randint(0, 256, [640, 480, 3])
+    for pp_str in [
+        "inception_crop(1)",
+        "resize()",
+        "resize(1, 1, 1)"
+        "flip_lr(1)",
+        "central_crop()",
+    ]:
+      with self.assertRaises(BaseException):
+        builder.get_preprocess_fn(pp_str)(x)
 
 
 if __name__ == "__main__":
-    tf.test.main()
+  tf.test.main()

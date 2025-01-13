@@ -1,20 +1,19 @@
 from dataclasses import dataclass
-from enum import Enum
 from fnmatch import fnmatch
-from functools import reduce
 import hashlib
-from itertools import chain
 import json
 import logging
-from operator import mul
-from optparse import Option
 import os
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Iterable
 
 import dlimp as dl
 import numpy as np
 import tensorflow as tf
 import tqdm
+from enum import Enum
+from itertools import chain 
+from functools import reduce
+from operator import mul
 
 
 def tree_map(fn: Callable, tree: dict) -> dict:
@@ -41,7 +40,6 @@ class NormalizationType(str, Enum):
 
     NORMAL = "normal"  # normalize to mean 0, std 1
     BOUNDS = "bounds"  # normalize to [-1, 1]
-
 
 def to_padding(tensor: tf.Tensor) -> tf.Tensor:
     if tf.debugging.is_numeric_tensor(tensor):
@@ -394,153 +392,3 @@ def allocate_threads(n: Optional[int], weights: np.ndarray):
     for i in np.argsort(fractional)[::-1][: int(n)]:
         allocation[i] += 1
     return allocation
-
-
-# track mode
-# calculate selection probabilities
-# do selection
-
-
-@dataclass
-class AnnotationSelectionManager:
-    lang_info_str: str
-    modality_keep_probabilities: dict[str, float] = None
-    simple_ratio: float = -1.0
-    remove_keys: Iterable[str] = None
-    reconstruction_loss_keys: Iterable[str] = None
-    uniform_modality_dropout: bool = False
-    eval_skip_keys: tuple = tuple()
-    num_gpt_gen: int = -1
-    rephrase_prefixes: Iterable[str] = None
-    all_lang_prefixes: Iterable[str] = None
-    force_uniform_overall: bool = False
-    rephrase_probability: float = 0.5
-    force_simple_only: bool = False
-
-    def __post_init__(self):
-        if self.remove_keys is None:
-            self.remove_keys = {""}
-        else:
-            self.remove_keys = set(self.remove_keys)
-        self.keys = np.array(list(self.lang_info_str.split("|")))
-        self.valid_keys = [key for key in self.keys if key not in self.remove_keys]
-        self.create_annotation_key_map()
-        self.calculate_probabilities()
-        self.eval_keys = tuple(set(self.valid_keys) - set(self.eval_skip_keys))
-
-    def create_annotation_key_map(self):
-        self.key_map = {
-            desc_key: f"all_lang_{i}" for i, desc_key in enumerate(self.keys)
-        }
-        self.rev_key_map = {v: k for k, v in self.key_map.items()}
-        self.dataset_keys = np.array(list(self.rev_key_map.keys()))
-        self.dataset_valid_keys = np.array(
-            [self.key_map[key] for key in self.valid_keys]
-        )
-        self.dataset_remove_keys = set([self.key_map[key] for key in self.remove_keys])
-        self.key_to_index = {desc_key: i for i, desc_key in enumerate(self.keys)}
-        self.index_to_key = {i: desc_key for i, desc_key in enumerate(self.keys)}
-
-    def calculate_probabilities(self):
-        def normalize(vector: np.ndarray, target_sum=1.0):
-            vector *= float(target_sum) / np.sum(vector)
-            vector[-1] += target_sum - np.sum(vector)
-            return vector
-
-        if self.force_uniform_overall:
-            probs = np.array(
-                [float(key not in self.remove_keys) for key in self.key_map]
-            )
-            probs = normalize(probs)
-            self.probabilities = self.reconstruction_probabilities = probs
-            return
-        elif self.force_simple_only:
-            probs = np.array([float(key == "simple") for key in self.key_map])
-            probs = normalize(probs)
-            self.probabilities = self.reconstruction_probabilities = probs
-            return
-
-        # uniformly select keys for reconstruction loss
-        self.reconstruction_probabilities = np.array(
-            [float(key not in self.remove_keys) for key in self.key_map]
-        )
-        self.reconstruction_probabilities = normalize(self.reconstruction_probabilities)
-
-        self.probabilities = np.zeros(
-            len(self.key_map),
-        )
-        prob_dict = {}
-
-        #### Simple
-        prob_dict["simple"] = self.simple_ratio
-
-        ### Modalities
-        modality_keys = [key for key in self.valid_keys if key != "simple"]
-        if self.uniform_modality_dropout:
-            annotation_probabilities = np.array(
-                [float(key in modality_keys) for key in self.key_map]
-            )
-        else:
-            all_modality_names = set(
-                chain.from_iterable([key.split(",") for key in modality_keys])
-            )
-            probabilities = [
-                reduce(
-                    mul,
-                    [
-                        self.modality_keep_probabilities[modality]
-                        if modality in modalities_tuple
-                        else 1 - self.modality_keep_probabilities[modality]
-                        for modality in all_modality_names
-                    ],
-                )
-                for modalities_tuple in [key.split(",") for key in modality_keys]
-            ]
-            annotation_probabilities = np.zeros(
-                len(self.key_map),
-            )
-            for key, prob in zip(modality_keys, probabilities):
-                annotation_probabilities[self.key_to_index[key]] = prob
-
-        annotation_probabilities = normalize(
-            annotation_probabilities, target_sum=1.0 - self.simple_ratio
-        )
-        modality_probabilities = {
-            modality_key: annotation_probabilities[self.key_to_index[modality_key]]
-            for modality_key in modality_keys
-        }
-        prob_dict.update(modality_probabilities)
-
-        for key, prob in prob_dict.items():
-            self.probabilities[self.key_to_index[key]] = prob
-        self.probabilities = normalize(self.probabilities)
-
-    def choose_random_keys(self, shape=None, reconstruction=False):
-        probabilities = (
-            self.reconstruction_probabilities if reconstruction else self.probabilities
-        )
-        return np.random.choice(self.dataset_keys, size=shape, p=probabilities)
-
-    def get_language_reconstruction_size_kwargs(self):
-        pass
-
-    def choose_rephrase_keys(self, shape=None):
-        rephrase_indices = np.random.randint(0, self.num_gpt_gen, size=shape)
-        modality_indices = np.random.choice(
-            len(self.dataset_keys), size=shape, p=self.probabilities
-        )
-        rephrase_keys = [
-            f"rephrased_{modality_idx}_{rephrase_idx}"
-            for rephrase_idx, modality_idx in zip(rephrase_indices, modality_indices)
-        ]
-        named_keys = [f"all_lang_{modality_idx}" for modality_idx in modality_indices]
-        return named_keys, rephrase_keys
-
-    def choose_all_rephrase_keys(self, shape=None):
-        rephrase_indices = np.random.randint(
-            0, self.num_gpt_gen, size=shape + (len(self.dataset_keys),)
-        )
-        return rephrase_indices
-
-    def should_rephrase(self, shape=None):
-        return np.random.uniform(size=shape) < self.rephrase_probability

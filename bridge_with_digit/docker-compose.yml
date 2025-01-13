@@ -1,0 +1,40 @@
+version: "3.9"
+services:
+  robonet-digit:
+    image: robonet-base-digit
+    container_name: robonet-digit
+    build:
+      context: widowx_envs
+    entrypoint: ./widowx_envs/scripts/run.sh
+    environment:
+      - DISPLAY=:0
+    user: robonet:1002
+    stdin_open: true
+    tty: true
+    device_cgroup_rules:
+      - 'c *:* rmw'
+    network_mode: host
+    volumes:
+      - ${USB_CONNECTOR_CHART:-/dev/null}:/tmp/camera_connector_chart
+      # if you want to be able to edit widowx_envs code without rebuilding the image, this
+      # overwrites the widowx_envs directory that was copied in at build time
+      - ./experiments:/home/robonet/experiments
+      - ./data:/home/robonet/trainingdata  # TODO (YL): better way to mount a local directory
+      # $HOME/widowx_data:/home/robonet/trainingdata
+      - ./widowx_envs:/home/robonet/widowx_envs
+      - /dev:/dev  # for host tty access
+
+  bridge_data_v2:
+    image: robonet-digit-bridge-data-v2
+    container_name: robonet_digit_bridge_data_v2
+    user: robonet:1002
+    build:
+      context: code/bridge_data_v2
+    network_mode: host
+    environment:
+      - WANDB_API_KEY=putwandbkeyhere
+    volumes:
+      - ./widowx_envs:/home/robonet/widowx_envs 
+      - ./code/bridge_data_v2:/home/robonet/code/bridge_data_v2
+      - ./experiments:/home/robonet/experiments
+      - /media/harddrive/:/home/robonet/trainingdata

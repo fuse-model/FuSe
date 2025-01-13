@@ -25,29 +25,29 @@ from ml_collections import ConfigDict
 
 
 def get_config():
-    c = ConfigDict()
+  c = ConfigDict()
 
-    shape = (240, 240, 3)
-    c.batch_size = 8  # swept
-    c.init_shapes = [(1, *shape)]
-    c.representation_layer = "pre_logits"
+  shape = (240, 240, 3)
+  c.batch_size = 8  # swept
+  c.init_shapes = [(1, *shape)]
+  c.representation_layer = 'pre_logits'
 
-    # Creating complete model using all params, the sweep will go over variants.
-    c.model_name = "xp.flexivit.vit"
-    c.model = dict(
-        variant="B",
-        pool_type="tok",
-        patch_size=(10, 10),  # Like deit@384
-        seqhw=(24, 24),
-    )
-    c.num_classes = 0
+  # Creating complete model using all params, the sweep will go over variants.
+  c.model_name = 'xp.flexivit.vit'
+  c.model = dict(
+      variant='B',
+      pool_type='tok',
+      patch_size=(10, 10),  # Like deit@384
+      seqhw=(24, 24),
+  )
+  c.num_classes = 0
 
-    c.evals = {}
-    c.evals.timing = dict(
-        type="timing",
-        input_shapes=[shape],
-        timing=True,
-        pred_kw=dict(outputs=("pre_logits",)),
-    )
+  c.evals = {}
+  c.evals.timing = dict(
+      type='timing',
+      input_shapes=[shape],
+      timing=True,
+      pred_kw=dict(outputs=('pre_logits',)),
+  )
 
-    return c
+  return c

@@ -16,59 +16,60 @@
 # pylint: disable=consider-using-from-import
 import functools
 import json
-import os
 
 import numpy as np
 from panopticapi import utils as pycoco_utils
 from skimage import segmentation
+
 import tensorflow.io.gfile as gfile
 
-ROOT = os.environ.get("COCO_DATA_DIR", ".")
+
+import os
+ROOT = os.environ.get('COCO_DATA_DIR', '.')
 
 
-PANOPTIC_COCO_CATS_FILE = f"{ROOT}/panoptic_coco_categories.json"
+PANOPTIC_COCO_CATS_FILE = f'{ROOT}/panoptic_coco_categories.json'
 
 
 @functools.lru_cache(maxsize=None)
 def _coco_panoptic_categories():
-    with gfile.GFile(PANOPTIC_COCO_CATS_FILE, "r") as f:
-        categories_list = json.load(f)
-    return tuple(categories_list)
+  with gfile.GFile(PANOPTIC_COCO_CATS_FILE, 'r') as f:
+    categories_list = json.load(f)
+  return tuple(categories_list)
 
 
 def rgb_panoptic_from_twochannels(twochannels, boundaries: bool = False):
-    """Makes a RGB panoptic output and segments_info from a twochannels view."""
-    semantics = twochannels[..., 0]
-    instances = twochannels[..., 1]
-    max_instances = np.max(instances) + 1
-    merged = semantics * max_instances + instances
-    merged = np.where(semantics < 0, semantics, merged)
+  """Makes a RGB panoptic output and segments_info from a twochannels view."""
+  semantics = twochannels[..., 0]
+  instances = twochannels[..., 1]
+  max_instances = np.max(instances) + 1
+  merged = semantics * max_instances + instances
+  merged = np.where(semantics < 0, semantics, merged)
 
-    categories_list = _coco_panoptic_categories()
-    categories = {category["id"]: category for category in categories_list}
-    id_generator = pycoco_utils.IdGenerator(categories)
-    segments_info = {}
-    rgb = np.zeros((*instances.shape[:2], 3), dtype=np.uint8)
+  categories_list = _coco_panoptic_categories()
+  categories = {category['id']: category for category in categories_list}
+  id_generator = pycoco_utils.IdGenerator(categories)
+  segments_info = {}
+  rgb = np.zeros((*instances.shape[:2], 3), dtype=np.uint8)
 
-    for merged_id in np.unique(merged):
-        if merged_id // max_instances > 0:
-            category = categories_list[int(merged_id // max_instances) - 1]
-            segment_id, color = id_generator.get_id_and_color(category["id"])
-        else:
-            category = {"id": -1, "name": "void", "isthing": False}
-            segment_id, color = -1, np.array([0, 0, 0])
-        segments_info[segment_id] = {
-            "id": segment_id,
-            "color": color,
-            "category_id": category["id"],
-            "name": category["name"],
-            "isthing": category["isthing"],
-        }
-        rgb[merged == merged_id] = color
+  for merged_id in np.unique(merged):
+    if merged_id // max_instances > 0:
+      category = categories_list[int(merged_id // max_instances) - 1]
+      segment_id, color = id_generator.get_id_and_color(category['id'])
+    else:
+      category = {'id': -1, 'name': 'void', 'isthing': False}
+      segment_id, color = -1, np.array([0, 0, 0])
+    segments_info[segment_id] = {
+        'id': segment_id,
+        'color': color,
+        'category_id': category['id'],
+        'name': category['name'],
+        'isthing': category['isthing'],
+    }
+    rgb[merged == merged_id] = color
 
-    if boundaries:
-        boundaries = segmentation.find_boundaries(
-            pycoco_utils.rgb2id(rgb), mode="thick"
-        )
-        rgb[boundaries] = 0
-    return rgb, segments_info
+  if boundaries:
+    boundaries = segmentation.find_boundaries(
+        pycoco_utils.rgb2id(rgb), mode='thick')
+    rgb[boundaries] = 0
+  return rgb, segments_info

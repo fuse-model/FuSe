@@ -40,6 +40,7 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
+
 _DESCRIPTION = """VizWiz VQA Dataset."""
 
 # pylint: disable=line-too-long
@@ -56,80 +57,72 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 # When running locally (recommended), copy files as above an use these:
-_VIZWIZVQA_PATH = "/tmp/data/vizwizvqa/"
+_VIZWIZVQA_PATH = '/tmp/data/vizwizvqa/'
 
 
 class VizWizVQA(tfds.core.GeneratorBasedBuilder):
-    """DatasetBuilder for VizWizVQA dataset."""
+  """DatasetBuilder for VizWizVQA dataset."""
 
-    VERSION = tfds.core.Version("1.0.0")
-    RELEASE_NOTES = {"1.0.0": "First release."}
+  VERSION = tfds.core.Version('1.0.0')
+  RELEASE_NOTES = {'1.0.0': 'First release.'}
 
-    def _info(self):
-        """Returns the metadata."""
-        return tfds.core.DatasetInfo(
-            builder=self,
-            description=_DESCRIPTION,
-            features=tfds.features.FeaturesDict(
-                {
-                    "question": tfds.features.Text(),
-                    "image/filename": tfds.features.Text(),
-                    "image": tfds.features.Image(encoding_format="jpeg"),
-                    "answers": tfds.features.Sequence(tfds.features.Text()),
-                    # can be "yes" "no" and "maybe" strings
-                    "answer_confidences": tfds.features.Sequence(tfds.features.Text()),
-                    "answerable": tfds.features.Scalar(np.int32),
-                    "question_id": tfds.features.Scalar(np.int32),
-                }
-            ),
-            supervised_keys=None,
-            homepage="https://vizwiz.org/tasks-and-datasets/vqa/",
-            citation=_CITATION,
-        )
+  def _info(self):
+    """Returns the metadata."""
+    return tfds.core.DatasetInfo(
+        builder=self,
+        description=_DESCRIPTION,
+        features=tfds.features.FeaturesDict({
+            'question': tfds.features.Text(),
+            'image/filename': tfds.features.Text(),
+            'image': tfds.features.Image(encoding_format='jpeg'),
+            'answers': tfds.features.Sequence(tfds.features.Text()),
+            # can be "yes" "no" and "maybe" strings
+            'answer_confidences': tfds.features.Sequence(tfds.features.Text()),
+            'answerable': tfds.features.Scalar(np.int32),
+            'question_id': tfds.features.Scalar(np.int32),
+        }),
+        supervised_keys=None,
+        homepage='https://vizwiz.org/tasks-and-datasets/vqa/',
+        citation=_CITATION,
+    )
 
-    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-        """Returns SplitGenerators."""
-        return {
-            split: self._generate_examples(split)
-            for split in (
-                "val",
-                "train",
-                "test",
-            )
-        }
+  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+    """Returns SplitGenerators."""
+    return {split: self._generate_examples(split)
+            for split in ('val', 'train', 'test',)}
 
-    def _generate_examples(self, split: str):
-        """Yields (key, example) tuples from test set."""
-        annot_fname = os.path.join(_VIZWIZVQA_PATH, "annotations", f"{split}.json")
+  def _generate_examples(self, split: str):
+    """Yields (key, example) tuples from test set."""
+    annot_fname = os.path.join(_VIZWIZVQA_PATH, 'annotations', f'{split}.json')
 
-        with open(annot_fname, "r") as f:
-            data = json.loads(f.read())
+    with open(annot_fname, 'r') as f:
+      data = json.loads(f.read())
 
-        for v in data:
+    for v in data:
 
-            answers = []
-            answer_confidences = []
+      answers = []
+      answer_confidences = []
 
-            image_file = v["image"]
-            answerable = -1
-            if split != "test":
-                for answer in v["answers"]:
-                    # A couple of answers in the train set are empty strings.
-                    if not answer["answer"]:
-                        continue
-                    answers.append(answer["answer"])
-                    answer_confidences.append(answer["answer_confidence"])
-                answerable = v["answerable"]
+      image_file = v['image']
+      answerable = -1
+      if split != 'test':
+        for answer in v['answers']:
+          # A couple of answers in the train set are empty strings.
+          if not answer['answer']:
+            continue
+          answers.append(answer['answer'])
+          answer_confidences.append(answer['answer_confidence'])
+        answerable = v['answerable']
 
-            question_id = image_file[:-4]
-            question_id = int(question_id.split("_")[-1])
+      question_id = image_file[:-4]
+      question_id = int(question_id.split('_')[-1])
 
-            yield v["image"], {
-                "question": v["question"],
-                "image/filename": image_file,
-                "question_id": question_id,
-                "image": os.path.join(_VIZWIZVQA_PATH, split, image_file),
-                "answers": answers,
-                "answer_confidences": answer_confidences,
-                "answerable": answerable,
-            }
+      yield v['image'], {
+          'question': v['question'],
+          'image/filename': image_file,
+          'question_id': question_id,
+          'image': os.path.join(_VIZWIZVQA_PATH, split, image_file),
+          'answers': answers,
+          'answer_confidences': answer_confidences,
+          'answerable': answerable,
+      }

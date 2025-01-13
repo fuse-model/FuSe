@@ -1,5 +1,6 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
+
 from octo.utils.spec import ModuleSpec
 
 
@@ -58,11 +59,11 @@ def get_config(config_string="full,multimodal"):
         num_steps=max_steps,
         log_interval=100,
         eval_interval=5000,
-        save_interval=50000,
+        save_interval=5000,
         save_dir=placeholder(str),
         seed=42,
         wandb=dict(
-            project="octo_finetune", group=placeholder(str), entity="joshuajones"
+            project="octo_finetune", group=placeholder(str), entity=placeholder(str)
         ),
         dataset_kwargs=FINETUNING_KWARGS,
         modality=task,

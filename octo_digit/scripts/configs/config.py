@@ -2,6 +2,7 @@ from typing import Union
 
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
+
 from octo.data.utils.text_processing import MuseEmbedding
 from octo.model.components.action_heads import MSEActionHead
 from octo.model.components.tokenizers import ImageTokenizer

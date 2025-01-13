@@ -43,10 +43,11 @@ import json
 import numpy as np
 import tensorflow_datasets as tfds
 
-_TALLYQA_PATH = "/tmp/data/tallyQA/"
-_VISUAL_GENOME_PATH = "/tmp/data/visual_genome/"
 
-_COCO_PATH = "/tmp/data/coco/"
+_TALLYQA_PATH = '/tmp/data/tallyQA/'
+_VISUAL_GENOME_PATH = '/tmp/data/visual_genome/'
+
+_COCO_PATH = '/tmp/data/coco/'
 
 
 _DESCRIPTION = """
@@ -67,81 +68,79 @@ _CITATION = """
 }
 """
 
-_HOMEPAGE = "https://github.com/manoja328/TallyQA_dataset"
+_HOMEPAGE = 'https://github.com/manoja328/TallyQA_dataset'
 
 
 class TallyQA(tfds.core.GeneratorBasedBuilder):
-    """Import TallyQA dataset."""
+  """Import TallyQA dataset."""
 
-    VERSION = tfds.core.Version("1.0.0")
-    RELEASE_NOTES = {"1.0.0": "Initial release."}
-    MANUAL_DOWNLOAD_INSTRUCTIONS = """
+  VERSION = tfds.core.Version('1.0.0')
+  RELEASE_NOTES = {'1.0.0': 'Initial release.'}
+  MANUAL_DOWNLOAD_INSTRUCTIONS = """
   There are three parts which should be downloaded:
   * TallyQA (train / test json files)
   * Visual Genome images (needed for train and test split)
   * COCO (2014) train / val images (only needed for train split)
   """
 
-    def _info(self) -> tfds.core.DatasetInfo:
-        """Returns the dataset metadata."""
-        features = tfds.features.FeaturesDict(
-            {
-                "image": tfds.features.Image(shape=(None, None, 3)),
-                "image_id": tfds.features.Scalar(dtype=np.int32),
-                "image_source": tfds.features.Text(),
-                "question": tfds.features.Text(),
-                "question_id": tfds.features.Scalar(dtype=np.int32),
-                "answer": tfds.features.Scalar(dtype=np.int32),
-                "issimple": tfds.features.Scalar(dtype=np.int32),
-            }
-        )
+  def _info(self) -> tfds.core.DatasetInfo:
+    """Returns the dataset metadata."""
+    features = tfds.features.FeaturesDict({
+        'image': tfds.features.Image(shape=(None, None, 3)),
+        'image_id': tfds.features.Scalar(dtype=np.int32),
+        'image_source': tfds.features.Text(),
+        'question': tfds.features.Text(),
+        'question_id': tfds.features.Scalar(dtype=np.int32),
+        'answer': tfds.features.Scalar(dtype=np.int32),
+        'issimple': tfds.features.Scalar(dtype=np.int32),
+    })
 
-        return tfds.core.DatasetInfo(
-            builder=self,
-            features=features,
-            description=_DESCRIPTION,
-            supervised_keys=None,
-            homepage=_HOMEPAGE,
-            citation=_CITATION,
-        )
+    return tfds.core.DatasetInfo(
+        builder=self,
+        features=features,
+        description=_DESCRIPTION,
+        supervised_keys=None,
+        homepage=_HOMEPAGE,
+        citation=_CITATION,
+    )
 
-    def _split_generators(self, dl_manager: tfds.download.DownloadManager) -> ...:
-        """Call the function which defines the splits."""
-        del dl_manager
-        return {
-            "train": self._generate_examples(split="train"),
-            "test": self._generate_examples(split="test"),
-        }
+  def _split_generators(self, dl_manager: tfds.download.DownloadManager) -> ...:
+    """Call the function which defines the splits."""
+    del dl_manager
+    return {
+        'train': self._generate_examples(split='train'),
+        'test': self._generate_examples(split='test'),
+    }
 
-    def _generate_examples(self, split: str) -> ...:
-        tally_json_file = f"{_TALLYQA_PATH}/{split}.json"
-        with open(tally_json_file, "r") as f:
-            tally_json = json.load(f)
+  def _generate_examples(self, split: str) -> ...:
+    tally_json_file = f'{_TALLYQA_PATH}/{split}.json'
+    with open(tally_json_file, 'r') as f:
+      tally_json = json.load(f)
 
-        for tally_qa in tally_json:
-            # The TallyQA images come from two sources: Visual Genome and COCO.
-            # Determine the correct dataset by inspecting the prefix.
-            filepath = tally_qa["image"]
-            if filepath.startswith("VG_100K"):
-                filepath = _VISUAL_GENOME_PATH + filepath
-            elif filepath.startswith("train2014") or filepath.startswith("val2014"):
-                filepath = _COCO_PATH + filepath
-            else:
-                raise ValueError(f"Unknown image path: {filepath}")
+    for tally_qa in tally_json:
+      # The TallyQA images come from two sources: Visual Genome and COCO.
+      # Determine the correct dataset by inspecting the prefix.
+      filepath = tally_qa['image']
+      if filepath.startswith('VG_100K'):
+        filepath = _VISUAL_GENOME_PATH + filepath
+      elif filepath.startswith('train2014') or filepath.startswith('val2014'):
+        filepath = _COCO_PATH + filepath
+      else:
+        raise ValueError(f'Unknown image path: {filepath}')
 
-            tally_qa_dict = {
-                "image": filepath,
-                "image_id": tally_qa["image_id"],
-                "image_source": tally_qa["data_source"],
-                "question": tally_qa["question"],
-                "question_id": tally_qa["question_id"],
-                "answer": int(tally_qa["answer"]),
-            }
-            if split == "test":
-                # Field only present in test split.
-                tally_qa_dict.update({"issimple": tally_qa["issimple"]})
-            else:
-                # In the train split, we set issimple to -1 to indicate it is not known.
-                tally_qa_dict.update({"issimple": -1})
-            tally_qa_id = f'{tally_qa_dict["image_id"]} / {tally_qa_dict["question_id"]}'  # pylint: disable=line-too-long
-            yield tally_qa_id, tally_qa_dict
+      tally_qa_dict = {
+          'image': filepath,
+          'image_id': tally_qa['image_id'],
+          'image_source': tally_qa['data_source'],
+          'question': tally_qa['question'],
+          'question_id': tally_qa['question_id'],
+          'answer': int(tally_qa['answer']),
+      }
+      if split == 'test':
+        # Field only present in test split.
+        tally_qa_dict.update({'issimple': tally_qa['issimple']})
+      else:
+        # In the train split, we set issimple to -1 to indicate it is not known.
+        tally_qa_dict.update({'issimple': -1})
+      tally_qa_id = f'{tally_qa_dict["image_id"]} / {tally_qa_dict["question_id"]}'  # pylint: disable=line-too-long
+      yield tally_qa_id, tally_qa_dict

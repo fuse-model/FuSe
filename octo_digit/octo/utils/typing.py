@@ -2,7 +2,7 @@ from typing import Any, Mapping, Sequence, Union
 
 import jax
 
-PRNGKey = jax.random.KeyArray
+PRNGKey = jax.Array
 PyTree = Union[jax.typing.ArrayLike, Mapping[str, "PyTree"]]
 Config = Union[Any, Mapping[str, "Config"]]
 Params = Mapping[str, PyTree]

@@ -1,2 +1,0 @@
-vit_all_lang_20240702_071108
-resnet_norep_cams_digit_embeddings_multi_20240703_092936
