@@ -16,11 +16,12 @@
 
 # pylint: disable=line-too-long
 inits = {  # pylint: disable=duplicate-key Internally, we override some paths for convenience.
-    "BiT-M R152x2 imagenet2012 ic224": "gs://bit_models/distill/R152x2_T_224.npz",
-    "BiT-M R152x2 imagenet2012 rc384": "gs://bit_models/distill/R152x2_T_384.npz",
-    "BiT-M R152x2 flowers rc128": "gs://bit_models/distill/R152x2_T_flowers128.npz",
-    "BiT-M R152x2 pet rc128": "gs://bit_models/distill/R152x2_T_pet128.npz",
-    "BiT-M R152x2 food rc128": "gs://bit_models/distill/R152x2_T_food128.npz",
-    "BiT-M R152x2 sun rc128": "gs://bit_models/distill/R152x2_T_sun128.npz",
+    'BiT-M R152x2 imagenet2012 ic224': 'gs://bit_models/distill/R152x2_T_224.npz',
+    'BiT-M R152x2 imagenet2012 rc384': 'gs://bit_models/distill/R152x2_T_384.npz',
+    'BiT-M R152x2 flowers rc128': 'gs://bit_models/distill/R152x2_T_flowers128.npz',
+    'BiT-M R152x2 pet rc128': 'gs://bit_models/distill/R152x2_T_pet128.npz',
+    'BiT-M R152x2 food rc128': 'gs://bit_models/distill/R152x2_T_food128.npz',
+    'BiT-M R152x2 sun rc128': 'gs://bit_models/distill/R152x2_T_sun128.npz',
+
 }
 # pylint: enable=line-too-long

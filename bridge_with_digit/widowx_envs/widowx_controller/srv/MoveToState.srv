@@ -1,0 +1,5 @@
+float32[] target_xyz
+float32 target_zangle
+float32 duration
+---
+int32 success

@@ -1,0 +1,6 @@
+#rename this file to "usb_connector_chart_user.yml"
+cam0: 'usb-0000:00:14.0-10.2'
+cam1: 'usb-0000:00:14.0-10.4'
+cam2: 'usb-0000:00:14.0-9.3'
+cam3: 'usb-0000:08:00.0-2'
+cam4: "usb-0000:00:14.0-9.2"

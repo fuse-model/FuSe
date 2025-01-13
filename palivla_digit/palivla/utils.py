@@ -1,12 +1,10 @@
 import re
-
-import flax
 import jax
 from jax.experimental import multihost_utils
 import numpy as np
-from palivla.types import Params
 import tensorflow as tf
-
+import flax
+from palivla.types import Params
 
 def freeze_structure(structure):
     return jax.tree_util.tree_map(
@@ -14,7 +12,6 @@ def freeze_structure(structure):
         structure,
         is_leaf=lambda x: isinstance(x, list),
     )
-
 
 def key_string(path, separator="/") -> str:
     def _component_to_string(component) -> str:
@@ -28,7 +25,6 @@ def key_string(path, separator="/") -> str:
             return str(component.key)
         else:
             return str(component)
-
     return separator.join(_component_to_string(component) for component in path)
 
 
@@ -55,10 +51,10 @@ def host_broadcast_str(x: str | None) -> str:
 
 
 def load_tvl_weights(pretrained_path: str) -> dict[tuple, np.ndarray]:
-    with tf.io.gfile.GFile(pretrained_path, "rb") as f:
+    with tf.io.gfile.GFile(pretrained_path, 'rb') as f:
         ckpt_dict = np.load(f, allow_pickle=False)
     keys, values = zip(*list(ckpt_dict.items()))
-    return {tuple(k.split("|")): v for k, v in zip(keys, values)}
+    return {tuple(k.split('|')): v for k, v in zip(keys, values)}
 
 
 def merge_params(init_params: Params, pretrained_params: Params) -> Params:
@@ -66,11 +62,7 @@ def merge_params(init_params: Params, pretrained_params: Params) -> Params:
         if possible_param2 is not None:
             return possible_param2
         return possible_param1
-
     flat_init_params = flax.traverse_util.flatten_dict(init_params)
     flat_pretrained_params = flax.traverse_util.flatten_dict(pretrained_params)
-    params = {
-        k: _merge(v_init, flat_pretrained_params.get(k, None))
-        for k, v_init in flat_init_params.items()
-    }
+    params = {k: _merge(v_init, flat_pretrained_params.get(k, None)) for k, v_init in flat_init_params.items()}
     return flax.traverse_util.unflatten_dict(params)

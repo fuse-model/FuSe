@@ -2,23 +2,22 @@ import tensorflow as tf
 
 tf.config.set_visible_devices([], "GPU")
 
-from functools import partial
-import json
-
-from absl import app, flags
-from flax.training.train_state import TrainState
 import jax
-from jax.experimental import multihost_utils
 import jax.numpy as jnp
-from ml_collections import config_flags
-import numpy as np
+from absl import app, flags
 import optax
+import json
+import numpy as np
+from functools import partial
 import orbax.checkpoint as ocp
-from palivla.dataset import prepare_image
-from palivla.load_model import load_model
-from palivla.tokenizer import Tokenizer
-from scalax.sharding import FSDPShardingRule, MeshShardingHelper, PartitionSpec
 from tensorflow_text import SentencepieceTokenizer
+from palivla.dataset import prepare_image
+from palivla.tokenizer import Tokenizer
+from palivla.load_model import load_model
+from scalax.sharding import MeshShardingHelper, FSDPShardingRule, PartitionSpec
+from flax.training.train_state import TrainState
+from jax.experimental import multihost_utils
+from ml_collections import config_flags
 
 
 def main(_):
@@ -80,16 +79,8 @@ def main(_):
         ).restore(
             config.resume_from_checkpoint_step,
             items={"params": train_state.params},
-            restore_kwargs={
-                "restore_args": {
-                    "params": params_restore_args,
-                    "opt_state": ocp.RestoreArgs(),
-                    "step": ocp.RestoreArgs(),
-                }
-            },
-        )[
-            "params"
-        ]
+            restore_kwargs={"restore_args": {"params": params_restore_args, "opt_state": ocp.RestoreArgs(), "step": ocp.RestoreArgs()}},
+        )["params"]
     )
 
     # Load dataset statistics

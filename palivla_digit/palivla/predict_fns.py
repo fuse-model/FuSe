@@ -22,16 +22,19 @@ import collections
 import functools
 from typing import Sequence
 
+import jax.experimental
+import jax.experimental.multihost_utils
+
 from big_vision.pp import registry
 import big_vision.utils as u
 import einops
 import jax
-import jax.experimental
-import jax.experimental.multihost_utils
 import jax.numpy as jnp
 import numpy as np
+
 from palivla.model import PaliVLAModel
 from palivla.types import Data, Params, Variables
+
 
 P = jax.sharding.PartitionSpec
 
@@ -316,9 +319,7 @@ def _sample_logits(logits: jnp.ndarray, sampler: str):
 
     return sampled_tokens, sampled_logp
 
-
 registry.Registry.global_registry().clear()
-
 
 @registry.Registry.register("palivla_sampler.greedy")
 def _greedy_sampling(*, logits: jnp.ndarray, rng: jnp.ndarray):

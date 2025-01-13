@@ -70,69 +70,65 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 # When running locally (recommended), copy files as above an use these:
-_STVQA_PATH = "/tmp/data/stvqa/"
+_STVQA_PATH = '/tmp/data/stvqa/'
 
 
 class Stvqa(tfds.core.GeneratorBasedBuilder):
-    """DatasetBuilder for ST-VQA dataset."""
+  """DatasetBuilder for ST-VQA dataset."""
 
-    VERSION = tfds.core.Version("1.2.0")
-    RELEASE_NOTES = {
-        "1.0.0": "First release.",
-        "1.1.0": "Switch to COCO high-res images and lower-case answers.",
-        "1.2.0": "Rename pseudo splits and remove lower-case answers.",
-    }
+  VERSION = tfds.core.Version('1.2.0')
+  RELEASE_NOTES = {
+      '1.0.0': 'First release.',
+      '1.1.0': 'Switch to COCO high-res images and lower-case answers.',
+      '1.2.0': 'Rename pseudo splits and remove lower-case answers.',
+      }
 
-    def _info(self):
-        """Returns the metadata."""
+  def _info(self):
+    """Returns the metadata."""
 
-        return tfds.core.DatasetInfo(
-            builder=self,
-            description=_DESCRIPTION,
-            features=tfds.features.FeaturesDict(
-                {
-                    "question_id": tfds.features.Scalar(np.int32),
-                    "filename": tfds.features.Text(),
-                    "image": tfds.features.Image(encoding_format="jpeg"),
-                    "question": tfds.features.Text(),
-                    "answers": tfds.features.Sequence(tfds.features.Text()),
-                }
-            ),
-            supervised_keys=None,
-            homepage="https://rrc.cvc.uab.es/?ch=11",
-            citation=_CITATION,
-        )
+    return tfds.core.DatasetInfo(
+        builder=self,
+        description=_DESCRIPTION,
+        features=tfds.features.FeaturesDict({
+            'question_id': tfds.features.Scalar(np.int32),
+            'filename': tfds.features.Text(),
+            'image': tfds.features.Image(encoding_format='jpeg'),
+            'question': tfds.features.Text(),
+            'answers': tfds.features.Sequence(tfds.features.Text()),
+        }),
+        supervised_keys=None,
+        homepage='https://rrc.cvc.uab.es/?ch=11',
+        citation=_CITATION,
+    )
 
-    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-        """Returns SplitGenerators."""
-        return {
-            split: self._generate_examples(split) for split in ("train", "val", "test")
-        }
+  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+    """Returns SplitGenerators."""
+    return {split: self._generate_examples(split)
+            for split in ('train', 'val', 'test')}
 
-    def _generate_examples(self, split):
-        """Yields (key, example) tuples."""
-        src_split = "test" if split == "test" else "train"
-        annot_fname = os.path.join(_STVQA_PATH, f"{src_split}_task_3.json")
-        images_path = f'{src_split}{"_task3" if src_split == "test" else ""}_images'
+  def _generate_examples(self, split):
+    """Yields (key, example) tuples."""
+    src_split = 'test' if split == 'test' else 'train'
+    annot_fname = os.path.join(_STVQA_PATH, f'{src_split}_task_3.json')
+    images_path = f'{src_split}{"_task3" if src_split == "test" else ""}_images'
 
-        with open(annot_fname, "r") as f:
-            data = json.loads(f.read())
+    with open(annot_fname, 'r') as f:
+      data = json.loads(f.read())
 
-        for x in data["data"]:
-            if split == "val" and x["file_path"] not in _VAL_IDS:
-                continue
-            elif split == "train" and x["file_path"] in _VAL_IDS:
-                continue
-            image_path = os.path.join(_STVQA_PATH, images_path, x["file_path"])
-            # Always use high-res COCO images from train2014 directory.
-            if x["file_path"].startswith("coco-text"):
-                image_path = image_path.replace(
-                    os.path.join(images_path, "coco-text"), "train2014"
-                )
-            yield x["question_id"], {
-                "question_id": x["question_id"],
-                "filename": x["file_path"],
-                "image": image_path,
-                "question": x["question"],
-                "answers": x.get("answers", []),
-            }
+    for x in data['data']:
+      if split == 'val' and x['file_path'] not in _VAL_IDS:
+        continue
+      elif split == 'train' and x['file_path'] in _VAL_IDS:
+        continue
+      image_path = os.path.join(_STVQA_PATH, images_path, x['file_path'])
+      # Always use high-res COCO images from train2014 directory.
+      if x['file_path'].startswith('coco-text'):
+        image_path = image_path.replace(os.path.join(images_path, 'coco-text'),
+                                        'train2014')
+      yield x['question_id'], {
+          'question_id': x['question_id'],
+          'filename': x['file_path'],
+          'image': image_path,
+          'question': x['question'],
+          'answers': x.get('answers', []),
+      }

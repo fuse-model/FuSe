@@ -15,7 +15,26 @@ Our code is built on top of the [Octo](https://github.com/octo-models/octo) and 
 ![FuSE model](media/teaser.jpg)
 
 ## Get Started
-To install PaliVLA see the [PaliVLA README](palivla_digit/README.md). To install Octo see the [Octo README](octo_digit/README.md).
+Install PaliVLA:
+```
+cd palivla_digit
+uv venv
+source .venv/bin/activate
+uv sync --extra [gpu or tpu]
+uv pip install -e ../octo_digit --no-deps
+uv pip install -e ../bridge_with_digit/widowx_envs
+uv pip install -e .
+```
+
+Install Octo:
+```
+cd octo_digit
+uv venv
+source .venv/bin/activate
+uv sync --extra [gpu or tpu]
+uv pip install -e ../bridge_with_digit/widowx_envs
+uv pip install -e .
+```
 
 # Dataset Download
 We provide a dataset containing 26,866 trajectories collected on a WidowX robot at the RAIL lab @ UC Berkeley, USA. It contains visual, tactile, sound and action data collected across several environments, annotated with natural language.
@@ -24,11 +43,11 @@ You can download the dataset from the following [HuggingFace dataset](https://hu
 # Model Training
 For Octo:
 ```bash
-python octo_digit/scripts/finetune_fuse_pods.py --config=scripts/configs/fuse_config.py
+python octo_digit/scripts/finetune_fuse.py --config=scripts/configs/fuse_config.py
 ```
 For PaliVLA:
 ```bash
-python palivla_digit/palivla/train_fuse.py --config=palivla/configs/fuse_config.py
+python palivla_digit/palivla/train_fuse.py --config=palivla_digit/palivla/configs/fuse_config.py
 ```
 
 # Inference with Pretrained Models
@@ -40,7 +59,7 @@ python octo_digit/eval/fuse_eval.py --checkpoint_weights_path=ckpt.pth
 ```
 For PaliVLA:
 ```bash
-python palivla_digit/fuse_eval.py 
+python palivla_digit/fuse_eval.py --checkpoint_dir=ckpt.pth
 ```
 
 # License

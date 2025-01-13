@@ -1,32 +1,38 @@
 from functools import cached_property, partial
-from typing import Dict, Optional, Sequence
-
-from flax import linen as nn
-from flax.core.frozen_dict import freeze, FrozenDict, unfreeze
-from flax.struct import dataclass, field
+from typing import Dict, Optional, Sequence, Type
 from flax.training.train_state import TrainState as FlaxTrainState
+from flax.struct import dataclass, field
+from flax import linen as nn
+from flax.core.frozen_dict import FrozenDict, unfreeze, freeze
+from ml_collections.config_dict.config_dict import _is_type_safety_violation
 import jax
 import jax.experimental
 import jax.experimental.multihost_utils
 import jax.numpy as jnp
-import numpy as np
-import optax
 import orbax.checkpoint as ocp
-from palivla.eval_step import compute_eval_stats, compute_gen_stats
-from palivla.model import load_from_pretrained
-from palivla.predict_fns import _decode
-
-# from palivla.preprocess.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
-from palivla.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
-from palivla.spec import ModuleSpec, OptimizerSpec, restore_gluon_module
-from palivla.tokenizer import Tokenizer
-from palivla.train_step import step_fn, TrainingBatch
-from palivla.types import Params, RolloutBatch
-from palivla.utils import merge_params
-from scalax.sharding import MeshShardingHelper, PartitionSpec, ShardingRule
+from palivla import model
+from scalax.sharding import (
+    MeshShardingHelper,
+    ShardingRule,
+    PartitionSpec,
+)
+import optax
+import numpy as np
 import tensorflow as tf
 from tensorflow_text import SentencepieceTokenizer
 
+from palivla.eval_step import compute_eval_stats, compute_gen_stats
+from palivla.model import load_from_pretrained
+from palivla.spec import ModuleSpec, OptimizerSpec, restore_gluon_module
+from palivla.tokenizer import Tokenizer
+from palivla.sentencepiece_model_pb2 import ModelProto as SentencepieceModelProto
+from palivla.train_step import TrainingBatch, step_fn
+from palivla.types import Params, RolloutBatch
+from palivla.predict_fns import _decode
+from palivla.utils import merge_params
+
+def fmt_handler_name(name, suffix, is_legacy=False):
+    return f"{name}/{suffix}" if is_legacy else f"{name}_{suffix}"
 
 class ShardingMetadata:
     mesh: MeshShardingHelper
@@ -50,12 +56,12 @@ class TrainState(FlaxTrainState):
     sharding_metadata: ShardingMetadata | None = field(pytree_node=False)
 
     @classmethod
-    def get_checkpoint_handlers(cls, name: str):
+    def get_checkpoint_handlers(cls, name: str, is_legacy: bool = False):
         return {
-            f"{name}_model_spec": ocp.JsonCheckpointHandler(),
-            f"{name}_model_params": ocp.StandardCheckpointHandler(),
-            f"{name}_optimizer_spec": ocp.JsonCheckpointHandler(),
-            f"{name}_opt_state": ocp.StandardCheckpointHandler(),
+            fmt_handler_name(name, "model_spec", is_legacy=is_legacy): ocp.JsonCheckpointHandler(),
+            fmt_handler_name(name, "model_params", is_legacy=is_legacy): ocp.StandardCheckpointHandler(),
+            fmt_handler_name(name, "optimizer_spec", is_legacy=is_legacy): ocp.JsonCheckpointHandler(),
+            fmt_handler_name(name, "opt_state", is_legacy=is_legacy): ocp.StandardCheckpointHandler(),
         }
 
     @classmethod
@@ -161,19 +167,25 @@ class TrainState(FlaxTrainState):
         load_optimizer: bool,
         sharding_metadata: ShardingMetadata | None = None,
         step: int | None = None,
+        is_legacy: bool = False
     ):
         if step is None:
             step = checkpoint_manager.latest_step()
 
-        model_params_name = f"{name}_model_params"
-        model_spec_name = f"{name}_model_spec"
-        optimizer_spec_name = f"{name}_optimizer_spec"
-        opt_state_name = f"{name}_opt_state"
+        model_params_name = fmt_handler_name(name, "model_params", is_legacy=is_legacy)
+        model_spec_name = fmt_handler_name(name, "model_spec", is_legacy=is_legacy)
+        optimizer_spec_name = fmt_handler_name(name, "optimizer_spec", is_legacy=is_legacy)
+        opt_state_name = fmt_handler_name(name, "opt_state", is_legacy=is_legacy)
 
-        abstract_params = checkpoint_manager.item_metadata(step).get(model_params_name)[
-            "params"
-        ]
-
+        # breakpoint()
+        try:
+            abstract_params = checkpoint_manager.item_metadata(step).get(model_params_name)[
+                "params"
+            ]
+        except TypeError as e:
+            if jax.process_index() == 0:
+                breakpoint()
+            raise e
         if sharding_metadata is not None:
             shardings = sharding_metadata.mesh.match_sharding_rule(
                 sharding_metadata.model_sharding_rule, {"params": abstract_params}
@@ -219,8 +231,7 @@ class TrainState(FlaxTrainState):
             # Add the shardings
             if sharding_metadata is not None:
                 shardings = sharding_metadata.mesh.match_sharding_rule(
-                    sharding_metadata.model_sharding_rule,
-                    {"opt_state": abstract_opt_state},
+                    sharding_metadata.model_sharding_rule, {"opt_state": abstract_opt_state}
                 )["opt_state"]
                 abstract_opt_state = jax.tree_map(
                     lambda x, s: jax.ShapeDtypeStruct(x.shape, x.dtype, sharding=s),
@@ -309,6 +320,7 @@ class PaliVLATrainState:
         pretrained_params: Params | None = None,
         pretrained_action_tokenizer_state: TrainState | None = None,
         loaded_language_tokenizer: SentencepieceTokenizer | None = None,
+        skip_optimizer: bool = False,
     ):
         model_spec, params = load_from_pretrained(
             paligemma_weights_path,
@@ -331,7 +343,7 @@ class PaliVLATrainState:
             name="model",
             params=params,
             model_spec=model_spec,
-            optimizer_spec=optimizer_spec,
+            optimizer_spec=OptimizerSpec.create(optax.set_to_zero, {}) if skip_optimizer else optimizer_spec,
             sharding_metadata=model_sharding_metadata,
         )
 
@@ -425,16 +437,32 @@ class PaliVLATrainState:
         return self.save_args().keys()
 
     @classmethod
-    def get_checkpoint_handlers(cls):
+    def get_checkpoint_handlers(cls, is_legacy: bool = False):
         return {
-            **TrainState.get_checkpoint_handlers("model"),
-            **TrainState.get_checkpoint_handlers("action_tokenizer"),
+            **TrainState.get_checkpoint_handlers("model", is_legacy),
+            **TrainState.get_checkpoint_handlers("action_tokenizer", is_legacy),
             "config": ocp.JsonCheckpointHandler(),
             "dataset_statistics": ocp.JsonCheckpointHandler(),
             "language_tokenizer": ocp.ProtoCheckpointHandler(
                 "language_tokenizer.proto"
             ),
         }
+                
+    
+    @classmethod
+    def get_old_checkpoint_handlers(cls):
+        return dict(
+            params=ocp.StandardCheckpointHandler(),
+            opt_state=ocp.StandardCheckpointHandler(),
+            step=ocp.StandardCheckpointHandler(),
+            rng=ocp.StandardCheckpointHandler(),
+            model_spec=ocp.JsonCheckpointHandler(),
+            optimizer_spec=ocp.JsonCheckpointHandler(),
+            dataset_statistics=ocp.JsonCheckpointHandler(),
+            tokenizer_config=ocp.JsonCheckpointHandler(),
+            action_tokenizer_spec=ocp.JsonCheckpointHandler(),
+            action_tokenizer_params=ocp.StandardCheckpointHandler(),
+        )
 
     @classmethod
     def load_components(
@@ -446,6 +474,7 @@ class PaliVLATrainState:
         mesh: MeshShardingHelper,
         model_sharding: ShardingRule,
         data_sharding: ShardingRule,
+        is_legacy: bool = False
     ):
         step = step or checkpoint_manager.latest_step()
 
@@ -459,6 +488,7 @@ class PaliVLATrainState:
             load_optimizer=load_optimizer,
             step=step,
             sharding_metadata=model_sharding_metadata,
+            is_legacy=is_legacy,
         )
         restored_action_tokenizer_state = TrainState.restore(
             name="action_tokenizer",
@@ -466,6 +496,7 @@ class PaliVLATrainState:
             load_optimizer=False,
             step=step,
             sharding_metadata=action_tokenizer_sharding_metadata,
+            is_legacy=is_legacy,
         )
         restored = checkpoint_manager.restore(
             step,
@@ -479,7 +510,15 @@ class PaliVLATrainState:
         language_tokenizer = SentencepieceTokenizer(
             model=restored["language_tokenizer"].SerializeToString()
         )
-        return restored_model_state, restored_action_tokenizer_state, language_tokenizer
+
+        dataset_statistics = restored["dataset_statistics"]
+        dataset_statistics = jax.tree.map(
+            lambda x: np.array(x),
+            dataset_statistics,
+            is_leaf=lambda x: isinstance(x, list),
+        )
+
+        return restored_model_state, restored_action_tokenizer_state, language_tokenizer, dataset_statistics
 
     @classmethod
     def restore(
@@ -491,6 +530,7 @@ class PaliVLATrainState:
         mesh: MeshShardingHelper,
         model_sharding: ShardingRule,
         data_sharding: ShardingRule,
+        is_legacy: bool = False
     ):
         step = step or checkpoint_manager.latest_step()
 
@@ -504,6 +544,7 @@ class PaliVLATrainState:
             load_optimizer=load_optimizer,
             step=step,
             sharding_metadata=model_sharding_metadata,
+            is_legacy=is_legacy,
         )
         restored_action_tokenizer_state = TrainState.restore(
             name="action_tokenizer",
@@ -511,6 +552,7 @@ class PaliVLATrainState:
             load_optimizer=False,
             step=step,
             sharding_metadata=action_tokenizer_sharding_metadata,
+            is_legacy=is_legacy,
         )
 
         restored = checkpoint_manager.restore(
@@ -555,16 +597,13 @@ class PaliVLATrainState:
 
     @cached_property
     def step_fn(self):
-        # for some reason, static argnums not working, can't be bothered to figure it out
-        __step_fn = partial(
-            step_fn, self.detokenize_action, True, self.tokenizer.config, False
-        )
+        _step_fn = partial(step_fn, self.detokenize_action, True, self.tokenizer.config, False)
         if self.mesh is None:
-            _step_fn = partial(jax.jit, __step_fn)
+            _step_fn = partial(jax.jit, _step_fn)
         else:
             _step_fn = partial(
                 self.mesh.sjit,
-                __step_fn,
+                _step_fn,
                 args_sharding_constraint=(
                     self.model_state.sharding_metadata.model_sharding_rule,
                     self.data_sharding,
@@ -584,18 +623,16 @@ class PaliVLATrainState:
                 None,
             ),
         )
-
+    
     @cached_property
     def fuse_step_fn(self):
-        __step_fn = partial(
-            step_fn, self.detokenize_action, True, self.tokenizer.config, True
-        )
+        _step_fn = partial(step_fn, self.detokenize_action, True, self.tokenizer.config, True)
         if self.mesh is None:
-            _step_fn = partial(jax.jit, __step_fn)
+            _step_fn = partial(jax.jit, _step_fn)
         else:
             _step_fn = partial(
                 self.mesh.sjit,
-                __step_fn,
+                _step_fn,
                 args_sharding_constraint=(
                     self.model_state.sharding_metadata.model_sharding_rule,
                     self.data_sharding,
@@ -617,24 +654,20 @@ class PaliVLATrainState:
         )
 
     def prepare_sensors(self, sensors: Dict[str, jax.Array]):
-        return {
-            k: (v / 127.5 - 1.0) if "image" in k and "digit" not in k else v
-            for k, v in sensors.items()
-        }
+        # digits are normalized elsewhere
+        return {k: (v / 127.5 - 1.0) if "image" in k and "digit" not in k else v for k, v in sensors.items()}
 
     def prepare_batch(self, batch: TrainingBatch):
         return batch.replace(sensors=self.prepare_sensors(batch.sensors))
 
-    def train_step(
-        self,
-        batch: TrainingBatch,
-    ):
+    def train_step(self, batch: TrainingBatch,):
         with self.mesh.mesh, nn.logical_axis_rules([("act_batch", "fsdp")]):
             self.model_state, base_info, self.rng = self.step_fn(
                 self.model_state,
                 self.prepare_batch(batch),
                 self.rng,
             )
+        
 
             self.model_state, fuse_info, self.rng = self.fuse_step_fn(
                 self.model_state,
@@ -711,3 +744,4 @@ class PaliVLATrainState:
             )
 
         return jax.device_get(results)
+

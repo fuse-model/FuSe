@@ -40,9 +40,9 @@ fi
 
 # Set the source and destination directories based on the zone
 if [[ $ZONE == "europe-west4-"* ]]; then
-    DEST_DIR="$TPU_VM_NAME:/nfs/nfs3/users/kstachowicz/big_vision"
+    DEST_DIR="$TPU_VM_NAME:/nfs/nfs3/users/kstachowicz/big_vision_multimodal"
 elif [[ $ZONE == "us-central2-"* ]]; then
-    DEST_DIR="data-machine:/nfs/nfs2/users/kstachowicz/big_vision"
+    DEST_DIR="data-machine:/nfs/nfs2/users/kstachowicz/big_vision_multimodal"
 else
     echo "Unsupported zone: $ZONE"
     exit 1
@@ -54,10 +54,11 @@ echo "DEST_DIR: $DEST_DIR"
 echo "Number of workers: $NUM_WORKERS"
 
 # Copy the source directory to the TPU VM
-rsync -avzL --exclude .git --exclude-from=.gitignore . $DEST_DIR
+rsync -avzL --exclude .git --exclude-from=.gitignore  . $DEST_DIR
 
 # Launch the pod configuration
 POD_NAME=$TPU_VM_NAME tpc launch pod_config.py
 
 # Connect to the pod
 bash ssh_pod.sh $TPU_VM_NAME
+

@@ -15,4 +15,4 @@ ln -s /nfs/nfs3/users/kstachowicz/.bashrc .bashrc
 ln -s /nfs/nfs3/users/kstachowicz/.netrc .netrc
 EOF
 
-/nfs/nfs3/users/kstachowicz/miniconda/bin/conda init bash
+/nfs/nfs3/users/kstachowicz/miniforge3/bin/conda init bash

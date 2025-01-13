@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="imtopic_name" default="/wrist/image_raw"/> 
+    <arg name="imtopic_is_py_node" default="true"/> 
+
+    <arg name="node_name" default="video_streamer" />
+
+    <node pkg="multicam_server" type="video_socket_streamer.py" name="$(arg node_name)" output="screen" >
+        <param name="name" type="string" value="$(arg imtopic_name)" /> 
+        <param name="is_python_node" type="bool" value="$(arg imtopic_is_py_node)" /> 
+    </node>
+</launch>

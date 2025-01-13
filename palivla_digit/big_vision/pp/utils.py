@@ -18,37 +18,36 @@ from collections import abc
 
 
 def maybe_repeat(arg, n_reps):
-    if not isinstance(arg, abc.Sequence) or isinstance(arg, str):
-        arg = (arg,) * n_reps
-    return arg
+  if not isinstance(arg, abc.Sequence) or isinstance(arg, str):
+    arg = (arg,) * n_reps
+  return arg
 
 
 class InKeyOutKey(object):
-    """Decorator for preprocessing ops, which adds `inkey` and `outkey` arguments.
+  """Decorator for preprocessing ops, which adds `inkey` and `outkey` arguments.
 
-    Note: Only supports single-input single-output ops.
-    """
+  Note: Only supports single-input single-output ops.
+  """
 
-    def __init__(self, indefault="image", outdefault="image", with_data=False):
-        self.indefault = indefault
-        self.outdefault = outdefault
-        self.with_data = with_data
+  def __init__(self, indefault="image", outdefault="image", with_data=False):
+    self.indefault = indefault
+    self.outdefault = outdefault
+    self.with_data = with_data
 
-    def __call__(self, orig_get_pp_fn):
-        def get_ikok_pp_fn(
-            *args, key=None, inkey=self.indefault, outkey=self.outdefault, **kw
-        ):
+  def __call__(self, orig_get_pp_fn):
 
-            orig_pp_fn = orig_get_pp_fn(*args, **kw)
+    def get_ikok_pp_fn(*args, key=None,
+                       inkey=self.indefault, outkey=self.outdefault, **kw):
 
-            def _ikok_pp_fn(data):
-                # Optionally allow the function to get the full data dict as aux input.
-                if self.with_data:
-                    data[key or outkey] = orig_pp_fn(data[key or inkey], data=data)
-                else:
-                    data[key or outkey] = orig_pp_fn(data[key or inkey])
-                return data
+      orig_pp_fn = orig_get_pp_fn(*args, **kw)
+      def _ikok_pp_fn(data):
+        # Optionally allow the function to get the full data dict as aux input.
+        if self.with_data:
+          data[key or outkey] = orig_pp_fn(data[key or inkey], data=data)
+        else:
+          data[key or outkey] = orig_pp_fn(data[key or inkey])
+        return data
 
-            return _ikok_pp_fn
+      return _ikok_pp_fn
 
-        return get_ikok_pp_fn
+    return get_ikok_pp_fn

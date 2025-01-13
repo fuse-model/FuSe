@@ -1,0 +1,30 @@
+<!-- launch configuration supporting standard webcams and realsense cameras -->
+<launch>
+    <arg name="video_stream_provider" default="0" />
+    <arg name="camera_connector_chart" default="" />
+    <arg name="python_node" default="false" />
+    <arg name="realsense" default="true" />
+    <arg name="serial_no_camera1"             default="913522070688"/>            <!-- Note: Replace with actual serial number -->
+    <arg name="camera1"                       default="D435"/>                    <!-- Note: Replace with camera name -->
+    <arg name="tf_prefix_camera1"         default="$(arg camera1)"/>
+    <arg name="initial_reset"             default="true"/>
+
+
+  <include file="$(find interbotix_xsarm_control)/launch/xsarm_control.launch">
+      <arg name="robot_model" value="$(env ROBONETV2_ARM)"/>
+      <arg name="use_rviz" value="False"/>
+  </include>
+
+  <include file="$(find multicam_server)/launch/cameras.launch">
+    <arg name="video_stream_provider" value="$(arg video_stream_provider)" />
+    <arg name="camera_connector_chart" value="$(arg camera_connector_chart)" />
+  </include>
+  
+  <group ns="$(arg camera1)">
+    <include file="$(find realsense2_camera)/launch/includes/nodelet.launch.xml">
+      <arg name="serial_no"             value="$(arg serial_no_camera1)"/>
+      <arg name="tf_prefix"                 value="$(arg tf_prefix_camera1)"/>
+      <arg name="initial_reset"         value="$(arg initial_reset)"/>
+    </include>
+  </group>
+</launch>

@@ -1,0 +1,4 @@
+---
+float32[] joint_angles
+float32[] joint_velocities
+float32[] cartesian_pose

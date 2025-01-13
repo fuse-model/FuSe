@@ -15,27 +15,31 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
-from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
 import plotly.graph_objects as go
 import tensorflow as tf
 import tqdm
 import wandb
 
-ACTION_DIM_LABELS = ["x", "y", "z", "yaw", "pitch", "roll", "grasp"]
+from eval.envs.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
+ACTION_DIM_LABELS = ['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'grasp']
 BASE_METRIC_KEYS = {
     "mse": ("mse", tuple()),  # What is the MSE
+
+    ### 
+    # 
+    # Per-dimension pred/true deltas 
+    # 
     ###
-    #
-    # Per-dimension pred/true deltas
-    #
-    ###
-    "delta_x": ("delta_x", tuple()),
-    "delta_y": ("delta_y", tuple()),
-    "delta_z": ("delta_z", tuple()),
-    "delta_yaw": ("delta_yaw", tuple()),
+    "delta_x": ("delta_x", tuple()), 
+    "delta_y": ("delta_y", tuple()), 
+    "delta_z": ("delta_z", tuple()), 
+    "delta_yaw": ("delta_yaw", tuple()), 
     "delta_pitch": ("delta_pitch", tuple()),
-    "delta_roll": ("delta_roll", tuple()),
-    "delta_grasp": ("delta_grasp", tuple()),
+    "delta_roll": ("delta_roll", tuple()), 
+    "delta_grasp": ("delta_grasp", tuple()), 
+
+
+
     ####
     #
     # XYZ delta metrics
@@ -409,18 +413,21 @@ def unnormalize(arr, mean, std, mask, **kwargs):
 def add_per_dimension_deltas(
     info,
     normalization_stats,
-):
+): 
     unnormalized_pred_acs = unnormalize(
         info["pred_actions"], **normalization_stats["action"]
     )[:, 0, :]
-    unnormalized_acs = unnormalize(info["actions"], **normalization_stats["action"])
+    unnormalized_acs = unnormalize(
+        info["actions"], **normalization_stats["action"]
+    )
     deltas = np.abs(unnormalized_acs - unnormalized_pred_acs)
     update_dict = {}
-    for i, dim in enumerate(ACTION_DIM_LABELS):
-        update_dict[f"delta_{dim}"] = deltas[:, i]
-    info.update(update_dict)
-    return info
-
+    for i, dim in enumerate(ACTION_DIM_LABELS): 
+        update_dict[f'delta_{dim}'] = deltas[:, i]
+    info.update( 
+       update_dict
+    )
+    return info 
 
 def add_unnormalized_info(
     info,

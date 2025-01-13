@@ -2,6 +2,7 @@ from functools import partial
 import json
 import logging
 from typing import Any, Optional, Tuple
+import re
 
 import flax
 from flax import struct
@@ -11,13 +12,16 @@ from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 import numpy as np
+import orbax.checkpoint
+import tensorflow as tf
+
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.components.action_heads import ActionHead
 from octo.model.octo_module import OctoModule
 from octo.utils.spec import ModuleSpec
-from octo.utils.typing import Config, Data, Params, Perturbations, PRNGKey, Sequence
-import orbax.checkpoint
-import tensorflow as tf
+from octo.utils.typing import Config, Data, Params, PRNGKey, Sequence
+from octo.utils.logging_utils import pretty_print_dict
+from octo.utils.fuse_constants import create_fuse_modal_masks, create_batch
 
 
 @struct.dataclass
@@ -68,9 +72,9 @@ class OctoModel:
     text_processor: TextProcessor = struct.field(pytree_node=False)
     config: Config = struct.field(pytree_node=False)
     params: Params
-    perturbations: Perturbations
     example_batch: Data
     dataset_statistics: Optional[Data]
+    fuse_modal_masks: Optional[Data]
 
     def create_tasks(
         self, goals: Optional[Data] = None, texts: Optional[Sequence[str]] = None
@@ -97,7 +101,7 @@ class OctoModel:
                 {
                     k: np.zeros((batch_size, *v.shape[1:]), dtype=v.dtype)
                     for k, v in self.example_batch["task"].items()
-                    if k not in ("pad_mask_dict", "language_instruction")
+                    if k not in ("pad_mask_dict", "language_instruction") and not isinstance(v, dict)
                 }
             )
             tasks["pad_mask_dict"].update(
@@ -164,47 +168,6 @@ class OctoModel:
             timestep_pad_mask,
             train=train,
             method="octo_transformer",
-        )
-
-    @partial(jax.jit, static_argnames=("train",))
-    def run_transformer_with_intermediates(
-        self,
-        observations: Data,
-        tasks: Data,
-        timestep_pad_mask: ArrayLike,
-        params,
-        perturbations,
-        train: bool = False,
-    ):
-        """Runs the transformer, but logs intermediates and perturbs values, for GradCAM.
-
-        Args:
-            observations: dictionary of arrays of shape (batch_size, window_size, *shape).
-                Shape must be consistent with self.example_batch["observation"]
-            tasks: dict of tasks of shape (batch_size, *shape)
-                Shape must be consistent with self.example_batch["task"]
-            timestep_pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
-            params:  current model params
-            perturbations: default perturbations
-            train: whether to run in train mode
-        """
-        _verify_shapes(
-            observations,
-            "observations",
-            self.example_batch["observation"],
-            starting_dim=2,
-        )
-        _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
-
-        params_kwargs = {"params": params, "perturbations": perturbations}
-        return self.module.apply(
-            params_kwargs,
-            observations,
-            tasks,
-            timestep_pad_mask,
-            train=train,
-            method="octo_transformer",
-            mutable="intermediates",
         )
 
     @partial(
@@ -274,8 +237,7 @@ class OctoModel:
         cls,
         checkpoint_path: str,
         step: Optional[int] = None,
-        create_perturbations: bool = False,
-        skip_load_params: bool = False,
+        text_processor_spec: Optional[ModuleSpec] = None,
     ) -> "OctoModel":
         """Loads a model from a checkpoint that was saved via `save_pretrained`.
 
@@ -348,44 +310,35 @@ class OctoModel:
             example_batch["task"],
             example_batch["observation"]["timestep_pad_mask"],
         )
-        if create_perturbations:
-            perturbations = module.init(jax.random.PRNGKey(0), *init_args, train=False)[
-                "perturbations"
-            ]
-        else:
-            perturbations = None
-        if skip_load_params:
-            logging.info(
-                "Skipping loading pretrained parameters, training from scratch"
-            )
-            params = module.init(jax.random.PRNGKey(0), *init_args, train=False)[
-                "params"
-            ]
-        else:
-            params_shape = jax.eval_shape(
-                partial(module.init, train=False), jax.random.PRNGKey(0), *init_args
-            )["params"]
-            # restore params, checking to make sure the shape matches
-            checkpointer = orbax.checkpoint.CheckpointManager(
-                checkpoint_path, orbax.checkpoint.PyTreeCheckpointer()
-            )
-            step = step if step is not None else checkpointer.latest_step()
-            params = checkpointer.restore(step, params_shape)
+        
+        params_shape = jax.eval_shape(
+            partial(module.init, train=False), jax.random.PRNGKey(0), *init_args
+        )["params"]
+        # restore params, checking to make sure the shape matches
+        checkpointer = orbax.checkpoint.CheckpointManager(
+            checkpoint_path, orbax.checkpoint.PyTreeCheckpointer()
+        )
+        step = step if step is not None else checkpointer.latest_step()
+        params = checkpointer.restore(step, params_shape)
 
-        if config["text_processor"] is not None:
+        if text_processor_spec is not None:
+            text_processor = ModuleSpec.instantiate(text_processor_spec)()
+        elif config["text_processor"] is not None:
             text_processor = ModuleSpec.instantiate(config["text_processor"])()
         else:
             text_processor = None
 
+        fuse_modal_masks = create_fuse_modal_masks(example_batch["observation"])
         return cls(
             module=module,
             params=params,
-            perturbations=perturbations,
             text_processor=text_processor,
             example_batch=example_batch,
             config=config,
             dataset_statistics=dataset_statistics,
+            fuse_modal_masks=fuse_modal_masks
         )
+ 
 
     def save_pretrained(
         self,
@@ -446,6 +399,79 @@ class OctoModel:
                         jax.tree_map(lambda x: x.tolist(), self.dataset_statistics),
                         f,
                     )
+    @jax.jit
+    def run_gen_single_head(self, obs, task):
+        def create_batch(obs, gen_mode): 
+            modality_obs = {}
+            for modality_key in gen_mode:
+                for obs_key in modality_obs_keys[modality_key]: 
+                    modality_obs[obs_key] = obs[obs_key] 
+            modality_obs['timestep_pad_mask'] = self.decode_pad_mask
+            return modality_obs 
+        info = {} 
+        bound_module = self.module.bind({"params": self.params})
+        for gen_mode, csv_mode in zip(gen_modes, csv_modes): 
+                modality_obs = create_batch(obs, gen_mode)
+                modality_obs = jax.tree_map(lambda x: x[None], modality_obs)
+                modality_transformer_embedding = bound_module.octo_transformer(
+                    modality_obs,
+                    task,
+                    modality_obs["timestep_pad_mask"],
+                    train=False,
+                )
+                # target_lang = batch['task'][gen_mode_lang_name]['input_ids']
+                decode_ids = bound_module.heads[f"gen"].reconstruct_lang(
+                    modality_transformer_embedding,
+                    mode=csv_mode,
+                    train=False,
+                )
+                info[f'gen_{csv_mode}'] = decode_ids
+        return info
+    
+    @jax.jit
+    def _decode(
+        self,
+        observation: Data,
+        task: Data,
+        timestep_pad_mask: Data,
+        modality_idx: int
+    ): 
+        bound_module = self.module.bind({"params": self.params})
+        modality_transformer_embedding = bound_module.octo_transformer(
+            observation,
+            task,
+            timestep_pad_mask,
+            train=False,
+        )
+        decode_ids = bound_module.heads[f"gen"].reconstruct_lang(
+            modality_transformer_embedding,
+            modality_idx=modality_idx,
+            train=False,
+        )
+        return decode_ids
+    
+    def decode_language(
+        self, 
+        obs: Data,
+        modality_idx: int,
+        remove_trailing_pads: bool = True,
+    ): 
+        """
+        Decodes language from the model's outputs.
+        """
+        task = self.create_tasks(texts=[''])
+        obs = jax.tree_map(lambda x: x[None], obs)
+        masked_obs = create_batch({'observation': obs}, obs.get('pad_mask_dict', None), self.fuse_modal_masks, modality_idx)['observation']
+        decode_ids = self._decode(
+            observation=masked_obs,
+            task=task,
+            timestep_pad_mask=obs['timestep_pad_mask'],
+            modality_idx=modality_idx,
+        )
+        text = self.text_processor.decode(decode_ids)[0]
+        if remove_trailing_pads:
+            text = re.sub("\.(<\/s>)*(<pad>)*", ".", text)
+        return text
 
     @classmethod
     def from_config(
@@ -488,18 +514,17 @@ class OctoModel:
         def _init(rng):
             return module.init(rng, *init_args, train=False)
 
-        variables = _init(rng)
-        params = variables["params"]
-        perturbations = variables["perturbations"]
+        params = _init(rng)['params']
 
+        fuse_modal_masks = create_fuse_modal_masks(example_batch["observation"])
         return cls(
             module=module,
             params=params,
-            perturbations=perturbations,
             text_processor=text_processor,
             example_batch=example_batch,
             config=config,
             dataset_statistics=dataset_statistics,
+            fuse_modal_masks=fuse_modal_masks,
         )
 
     def get_pretty_spec(self):
@@ -582,16 +607,7 @@ def _verify_shapes(
         and pytree_flat[k].shape[starting_dim:]
         != example_pytree_flat[k].shape[starting_dim:]
     }
-    logging.debug("Mismatched keys:  ", mismatched_keys)
-    SPECTRO_KEY = ("spectro",)
-    if SPECTRO_KEY in mismatched_keys:
-        spectro_batch_shape = pytree_flat[SPECTRO_KEY].shape[starting_dim:]
-        spectro_example_shape = example_pytree_flat[SPECTRO_KEY].shape[starting_dim:]
-        if (
-            len(spectro_batch_shape) == len(spectro_example_shape) - 1
-            and spectro_batch_shape + (1,) == spectro_example_shape
-        ):
-            del mismatched_keys[SPECTRO_KEY]
+    logging.debug('Mismatched keys:  ', mismatched_keys)
     if mismatched_keys:
         if not silent:
             logging.error(
@@ -603,34 +619,11 @@ def _verify_shapes(
             )
         fail = True
     if raise_error and (fail or (weak_fail and strict)):
-        MAX_KEY_LEN = 15
-        INDENT_SIZE = MAX_KEY_LEN + 4
-        INDENT = "".join([" " for _ in range(INDENT_SIZE)])
-
-        def recursive_dict_print(dictionary, prefix=""):
-            lines = []
-
-            def helper(dic, prefix=""):
-                for key, val in dic.items():
-                    key = key[:MAX_KEY_LEN]
-                    if isinstance(val, dict):
-                        lines.append(f"{prefix}{key}")
-                        new_prefix = prefix + INDENT
-                        helper(val, new_prefix)
-                    else:
-                        indent = "".join([" " for _ in range(INDENT_SIZE - len(key))])
-                        lines.append(f"{prefix}{key}:{indent}{val.shape}")
-
-            helper(dictionary, prefix=prefix)
-            return lines
-
-        error_output = []
-        error_output.append("Received pytree:")
-        error_output.extend(recursive_dict_print(pytree))
-        error_output.append("#######################")
-        error_output.append("example pytree:")
-        error_output.extend(example_pytree)
-        logging.error("\n".join(error_output))
+        logging.error('Received pytree:')
+        pretty_print_dict(pytree)
+        logging.error("#######################")
+        logging.error("example pytree:")
+        pretty_print_dict(example_pytree)
         raise AssertionError(f"{name} does not match example batch.")
 
     return weak_fail or fail

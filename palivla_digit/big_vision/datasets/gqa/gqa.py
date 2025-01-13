@@ -57,6 +57,7 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
+
 _DESCRIPTION = """GQA: Visual Reasoning in the Real World."""
 
 # pylint: disable=line-too-long
@@ -80,89 +81,87 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 
-_DATA_PATH = "/tmp/data/gqa/"
+_DATA_PATH = '/tmp/data/gqa/'
 
 
 class GQA(tfds.core.GeneratorBasedBuilder):
-    """DatasetBuilder for GQA dataset."""
+  """DatasetBuilder for GQA dataset."""
 
-    VERSION = tfds.core.Version("1.0.0")
-    RELEASE_NOTES = {"1.0.0": "First release."}
+  VERSION = tfds.core.Version('1.0.0')
+  RELEASE_NOTES = {'1.0.0': 'First release.'}
 
-    def _info(self):
-        """Returns the metadata."""
+  def _info(self):
+    """Returns the metadata."""
 
-        return tfds.core.DatasetInfo(
-            builder=self,
-            description=_DESCRIPTION,
-            features=tfds.features.FeaturesDict(
-                {
-                    "example_id": tfds.features.Scalar(np.int64),
-                    "image/id": tfds.features.Text(),
-                    "image": tfds.features.Image(encoding_format="jpeg"),
-                    "question": tfds.features.Text(),
-                    "answer": tfds.features.Text(),
-                    "full_answer": tfds.features.Text(),
-                    "is_balanced": tfds.features.Scalar(np.bool_),
-                }
-            ),
-            homepage="https://cs.stanford.edu/people/dorarad/gqa/",
-            citation=_CITATION,
-        )
+    return tfds.core.DatasetInfo(
+        builder=self,
+        description=_DESCRIPTION,
+        features=tfds.features.FeaturesDict({
+            'example_id': tfds.features.Scalar(np.int64),
+            'image/id': tfds.features.Text(),
+            'image': tfds.features.Image(encoding_format='jpeg'),
+            'question': tfds.features.Text(),
+            'answer': tfds.features.Text(),
+            'full_answer': tfds.features.Text(),
+            'is_balanced': tfds.features.Scalar(np.bool_),
+        }),
+        homepage='https://cs.stanford.edu/people/dorarad/gqa/',
+        citation=_CITATION,
+    )
 
-    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-        """Returns SplitGenerators."""
-        splits = [
-            # 'debug',
-            "train_all",
-            "train_balanced",
-            "testdev_all",
-            "testdev_balanced",
-            "val_all",
-            "val_balanced",
-            "challenge_all",
-            "challenge_balanced",
-        ]
-        return {split: self._generate_examples(split) for split in splits}
+  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+    """Returns SplitGenerators."""
+    splits = [
+        # 'debug',
+        'train_all',
+        'train_balanced',
+        'testdev_all',
+        'testdev_balanced',
+        'val_all',
+        'val_balanced',
+        'challenge_all',
+        'challenge_balanced',
+    ]
+    return {split: self._generate_examples(split) for split in splits}
 
-    def _generate_examples(self, split: str):
-        """Yields (key, example) tuples from dataset."""
-        if split == "train_all":
-            train_json_dir = os.path.join(_DATA_PATH, "train_all_questions", "*.json")
-            json_files = glob.glob(train_json_dir)
-        else:
-            json_files = [os.path.join(_DATA_PATH, f"{split}_questions.json")]
+  def _generate_examples(self, split: str):
+    """Yields (key, example) tuples from dataset."""
+    if split == 'train_all':
+      train_json_dir = os.path.join(_DATA_PATH, 'train_all_questions', '*.json')
+      json_files = glob.glob(train_json_dir)
+    else:
+      json_files = [os.path.join(_DATA_PATH, f'{split}_questions.json')]
 
-        def _prepare_data(json_path):
-            with open(os.path.join(json_path)) as f:
-                annotations = json.load(f)
-            return [(k, v) for k, v in annotations.items()]
+    def _prepare_data(json_path):
+      with open(os.path.join(json_path)) as f:
+        annotations = json.load(f)
+      return [(k, v) for k, v in annotations.items()]
 
-        def _process_example(entry):
-            question_id, question_data = entry
-            image_id = question_data["imageId"]
-            image_path = os.path.join(_DATA_PATH, "images", f"{image_id}.jpg")
-            answer = question_data["answer"] if "answer" in question_data else ""
-            if "fullAnswer" in question_data:
-                full_answer = question_data["fullAnswer"]
-            else:
-                full_answer = ""
+    def _process_example(entry):
+      question_id, question_data = entry
+      image_id = question_data['imageId']
+      image_path = os.path.join(_DATA_PATH, 'images', f'{image_id}.jpg')
+      answer = question_data['answer'] if 'answer' in question_data else ''
+      if 'fullAnswer' in question_data:
+        full_answer = question_data['fullAnswer']
+      else:
+        full_answer = ''
 
-            example = {
-                "example_id": question_id,
-                "image/id": image_id,
-                "image": image_path,
-                "question": question_data["question"],
-                "answer": answer,
-                "full_answer": full_answer,
-                "is_balanced": question_data["isBalanced"],
-            }
-            return question_id, example
+      example = {
+          'example_id': question_id,
+          'image/id': image_id,
+          'image': image_path,
+          'question': question_data['question'],
+          'answer': answer,
+          'full_answer': full_answer,
+          'is_balanced': question_data['isBalanced'],
+      }
+      return question_id, example
 
-        beam = tfds.core.lazy_imports.apache_beam
-        return (
-            beam.Create(json_files)
-            | beam.FlatMap(_prepare_data)
-            | beam.Reshuffle()
-            | beam.Map(_process_example)
-        )
+    beam = tfds.core.lazy_imports.apache_beam
+    return (
+        beam.Create(json_files)
+        | beam.FlatMap(_prepare_data)
+        | beam.Reshuffle()
+        | beam.Map(_process_example)
+    )

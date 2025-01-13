@@ -1,6 +1,7 @@
 import flax
 import jax
 import jax.numpy as jnp
+
 from octo.utils.typing import Sequence
 
 

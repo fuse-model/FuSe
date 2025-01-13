@@ -1,15 +1,9 @@
-import os
-import pickle
 import time
 
-from eval.recursive_dict_print import recursive_dict_print
 import gym
 import numpy as np
 from pyquaternion import Quaternion
 from widowx_envs.widowx_env_service import WidowXClient
-
-VERBOSE = os.environ.get("VERBOSE", "").lower() == "true"
-
 
 class LostConnection(Exception):
     pass
@@ -112,7 +106,6 @@ class WidowXGym(gym.Env):
 
     def step(self, action):
         # sticky gripper logic
-        start_time = time.time()
         if (action[-1] < 0.5) != self.is_gripper_closed:
             self.num_consecutive_gripper_change_actions += 1
         else:
@@ -124,11 +117,8 @@ class WidowXGym(gym.Env):
         action[-1] = 0.0 if self.is_gripper_closed else 1.0
 
         self.widowx_client.step_action(action, blocking=self.blocking)
-        after_step = time.time()
 
         raw_obs = self.widowx_client.get_observation()
-        # print(raw_obs.keys())
-        after_rec_obs = time.time()
         truncated = False
         if raw_obs is None:
             # this indicates a loss of connection with the server
@@ -138,12 +128,6 @@ class WidowXGym(gym.Env):
         else:
             obs = convert_obs(raw_obs, self.im_sizes)
             self._add_backgrounds(obs)
-        end_time = time.time()
-
-        if VERBOSE:
-            print(
-                f"Step:  send action={after_step - start_time}  receive observation={after_rec_obs - after_step}  convert observatino={end_time - after_rec_obs}    total={end_time-start_time}"
-            )
 
         return obs, 0, False, truncated, {}
 
@@ -161,9 +145,6 @@ class WidowXGym(gym.Env):
                 raise RuntimeError
             else:
                 return self.reset()
-        if VERBOSE:
-            print("########################\nRaw observation:    ")
-            recursive_dict_print(raw_obs)
         obs = convert_obs(raw_obs, self.im_sizes)
         if "digit_l" in obs:
             self.back_l = obs["digit_l"].copy()
@@ -171,9 +152,10 @@ class WidowXGym(gym.Env):
             obs = self._add_backgrounds(obs)
         else:
             raise RuntimeError
-        if VERBOSE:
-            print("########################\nConverted observation:     ")
-            recursive_dict_print(obs)
-            print("########################\n")
-        print("WidowxEnv reset!")
         return obs, {}
+    
+    def start_recording_on_server(self):
+        self.widowx_client.start_recording()
+    
+    def stop_recording_on_server(self, should_save: bool):
+        self.widowx_client.stop_recording(should_save)

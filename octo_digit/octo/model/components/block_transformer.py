@@ -10,6 +10,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from octo.model.components.base import TokenGroup
 from octo.model.components.transformer import Transformer
 
