@@ -1,5 +1,0 @@
-funcsigs
-opencv-python
-pyquaternion
-librosa
-edgeml @ git+https://github.com/youliangtan/edgeml.git

@@ -19,30 +19,40 @@ from big_vision.evaluators.proj.image_text import prompt_engineering
 
 
 class PromptEngineeringTest(absltest.TestCase):
-
-  def test_canonicalize_text(self):
-    self.assertEqual(prompt_engineering.canonicalize_text("test_test"), "test test")
-    self.assertEqual(
-        prompt_engineering.canonicalize_text("test___test"), "test test")
-    self.assertEqual(prompt_engineering.canonicalize_text("test"), "test")
-    self.assertEqual(prompt_engineering.canonicalize_text("test."), "test")
-    self.assertEqual(prompt_engineering.canonicalize_text(" test "), "test")
-    self.assertEqual(
-        prompt_engineering.canonicalize_text("test\ntest"), "test test")
-    self.assertEqual(
-        prompt_engineering.canonicalize_text("test  test"), "test test")
-    self.assertEqual(prompt_engineering.canonicalize_text("test {}"), "test")
-    self.assertEqual(
-        prompt_engineering.canonicalize_text(
-            "test {}", keep_punctuation_exact_string="{}"), "test {}")
-    self.assertEqual(
-        prompt_engineering.canonicalize_text(
-            " test  {}...", keep_punctuation_exact_string="{}"), "test {}")
-    self.assertEqual(
-        prompt_engineering.canonicalize_text(
-            "test {}  {}  {}", keep_punctuation_exact_string="{}"),
-        "test {} {} {}")
+    def test_canonicalize_text(self):
+        self.assertEqual(prompt_engineering.canonicalize_text("test_test"), "test test")
+        self.assertEqual(
+            prompt_engineering.canonicalize_text("test___test"), "test test"
+        )
+        self.assertEqual(prompt_engineering.canonicalize_text("test"), "test")
+        self.assertEqual(prompt_engineering.canonicalize_text("test."), "test")
+        self.assertEqual(prompt_engineering.canonicalize_text(" test "), "test")
+        self.assertEqual(
+            prompt_engineering.canonicalize_text("test\ntest"), "test test"
+        )
+        self.assertEqual(
+            prompt_engineering.canonicalize_text("test  test"), "test test"
+        )
+        self.assertEqual(prompt_engineering.canonicalize_text("test {}"), "test")
+        self.assertEqual(
+            prompt_engineering.canonicalize_text(
+                "test {}", keep_punctuation_exact_string="{}"
+            ),
+            "test {}",
+        )
+        self.assertEqual(
+            prompt_engineering.canonicalize_text(
+                " test  {}...", keep_punctuation_exact_string="{}"
+            ),
+            "test {}",
+        )
+        self.assertEqual(
+            prompt_engineering.canonicalize_text(
+                "test {}  {}  {}", keep_punctuation_exact_string="{}"
+            ),
+            "test {} {} {}",
+        )
 
 
 if __name__ == "__main__":
-  absltest.main()
+    absltest.main()

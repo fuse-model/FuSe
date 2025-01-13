@@ -21,42 +21,44 @@ ONE_HOT_AXIS = -2
 
 
 def input_pp(batch, config):
-  """Make inputs for colorization task."""
-  if "labels" not in batch:
-    # During predict of phase2 there is no 'labels' field.
-    x = None
-  else:
-    hp, wp = config.model.patch_size
-    x = {
-        "color": batch["labels"],
-    }
-    # Convert labels from (B, H, W) to (B, num_patches, C, patch_size)
-    x["color"] = einops.rearrange(
-        x["color"], "b (hn hp) (wn wp) c -> b (hn wn) c (hp wp)", hp=hp, wp=wp)
-  ctx = batch.get("image_ctx", batch.get("image", None))
-  return {"ctx": ctx, "x": x}
+    """Make inputs for colorization task."""
+    if "labels" not in batch:
+        # During predict of phase2 there is no 'labels' field.
+        x = None
+    else:
+        hp, wp = config.model.patch_size
+        x = {
+            "color": batch["labels"],
+        }
+        # Convert labels from (B, H, W) to (B, num_patches, C, patch_size)
+        x["color"] = einops.rearrange(
+            x["color"], "b (hn hp) (wn wp) c -> b (hn wn) c (hp wp)", hp=hp, wp=wp
+        )
+    ctx = batch.get("image_ctx", batch.get("image", None))
+    return {"ctx": ctx, "x": x}
 
 
 def loss_fn(logits, batch, config):
-  """Compute loss for colorization task."""
-  labels = input_pp(batch, config)["x"]
-  error = logits["color"] - labels["color"]
-  loss = jnp.square(error)
-  return loss, {"loss_color": loss}
+    """Compute loss for colorization task."""
+    labels = input_pp(batch, config)["x"]
+    error = logits["color"] - labels["color"]
+    loss = jnp.square(error)
+    return loss, {"loss_color": loss}
 
 
 def predict_outputs(logits, config):
-  """Make outputs for colorization task."""
-  # Map logits to (height, width, channels).
-  hp, wp = config.model.patch_size
-  hn, wn = np.array(config.model.input_size) // np.array((hp, wp))
-  assert ONE_HOT_AXIS == -2, "Rearrange below depends on this."
-  output = einops.rearrange(
-      logits["color"],
-      "b (hn wn) c (hp wp) -> b (hn hp) (wn wp) c",
-      hn=hn,
-      wn=wn,
-      hp=hp,
-      wp=wp)
-  output = jnp.clip(output, -1., 1.)
-  return {"color": output}
+    """Make outputs for colorization task."""
+    # Map logits to (height, width, channels).
+    hp, wp = config.model.patch_size
+    hn, wn = np.array(config.model.input_size) // np.array((hp, wp))
+    assert ONE_HOT_AXIS == -2, "Rearrange below depends on this."
+    output = einops.rearrange(
+        logits["color"],
+        "b (hn wn) c (hp wp) -> b (hn hp) (wn wp) c",
+        hn=hn,
+        wn=wn,
+        hp=hp,
+        wp=wp,
+    )
+    output = jnp.clip(output, -1.0, 1.0)
+    return {"color": output}

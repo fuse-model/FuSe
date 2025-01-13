@@ -47,7 +47,6 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
-
 _DESCRIPTION = """POPE dataset."""
 
 # pylint: disable=line-too-long
@@ -77,69 +76,69 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 # When running locally (recommended), copy files as above and use these:
-_POPE_PATH = '/tmp/data/pope/'
+_POPE_PATH = "/tmp/data/pope/"
 
 
 class POPEConfig(tfds.core.BuilderConfig):
-  """Configuration to build the dataset."""
+    """Configuration to build the dataset."""
 
-  pass
+    pass
 
 
 class POPE(tfds.core.GeneratorBasedBuilder):
-  """DatasetBuilder for POPE dataset."""
+    """DatasetBuilder for POPE dataset."""
 
-  VERSION = tfds.core.Version('1.0.0')
-  RELEASE_NOTES = {'1.0.0': 'First release.'}
-  BUILDER_CONFIGS = [
-      POPEConfig(name='pope_random', description='Random set'),
-      POPEConfig(name='pope_popular', description='Popular set'),
-      POPEConfig(name='pope_adversarial', description='Adversarial set'),
-  ]
+    VERSION = tfds.core.Version("1.0.0")
+    RELEASE_NOTES = {"1.0.0": "First release."}
+    BUILDER_CONFIGS = [
+        POPEConfig(name="pope_random", description="Random set"),
+        POPEConfig(name="pope_popular", description="Popular set"),
+        POPEConfig(name="pope_adversarial", description="Adversarial set"),
+    ]
 
-  def _info(self):
-    """Returns the metadata."""
-    return tfds.core.DatasetInfo(
-        builder=self,
-        description=_DESCRIPTION,
-        features=tfds.features.FeaturesDict({
-            'question_id': tfds.features.Scalar(np.int32),
-            'image/filename': tfds.features.Text(),
-            'image': tfds.features.Image(encoding_format='png'),
-            'question': tfds.features.Text(),
-            'answer': tfds.features.Text(),
-            'thing': tfds.features.Text(),
-        }),
-        supervised_keys=None,
-        homepage='https://github.com/AoiDragon/POPE',
-        citation=_CITATION,
-    )
+    def _info(self):
+        """Returns the metadata."""
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict(
+                {
+                    "question_id": tfds.features.Scalar(np.int32),
+                    "image/filename": tfds.features.Text(),
+                    "image": tfds.features.Image(encoding_format="png"),
+                    "question": tfds.features.Text(),
+                    "answer": tfds.features.Text(),
+                    "thing": tfds.features.Text(),
+                }
+            ),
+            supervised_keys=None,
+            homepage="https://github.com/AoiDragon/POPE",
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Returns SplitGenerators."""
-    return {'test': self._generate_examples('test', self.builder_config.name)}
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Returns SplitGenerators."""
+        return {"test": self._generate_examples("test", self.builder_config.name)}
 
-  def _generate_examples(self, split: str, source: str):
-    """Yields (key, example) tuples from test set."""
-    annot_fname = os.path.join(
-        _POPE_PATH, f'pope/coco_{source}.json'
-    )
+    def _generate_examples(self, split: str, source: str):
+        """Yields (key, example) tuples from test set."""
+        annot_fname = os.path.join(_POPE_PATH, f"pope/coco_{source}.json")
 
-    with open(annot_fname, 'r') as f:
-      data = [json.loads(line) for line in f]
+        with open(annot_fname, "r") as f:
+            data = [json.loads(line) for line in f]
 
-    for idx, v in enumerate(data):
-      question = v['text']
-      thing = (
-          question.replace('Is there an ', '')
-          .replace('Is there a ', '')
-          .replace(' in the image?', '')
-      )
-      yield idx, {
-          'question_id': idx,
-          'image/filename': v['image'],
-          'image': os.path.join(_POPE_PATH, 'images/val2014/', v['image']),
-          'question': question,
-          'answer': v['label'],
-          'thing': thing,
-      }
+        for idx, v in enumerate(data):
+            question = v["text"]
+            thing = (
+                question.replace("Is there an ", "")
+                .replace("Is there a ", "")
+                .replace(" in the image?", "")
+            )
+            yield idx, {
+                "question_id": idx,
+                "image/filename": v["image"],
+                "image": os.path.join(_POPE_PATH, "images/val2014/", v["image"]),
+                "question": question,
+                "answer": v["label"],
+                "thing": thing,
+            }

@@ -14,23 +14,21 @@
 
 """GIVT-specific preprocessing ops."""
 
-from big_vision.pp import registry
-from big_vision.pp import utils
+from big_vision.pp import registry, utils
 import tensorflow as tf
 
 
 @registry.Registry.register("preprocess_ops.bin_nyu_depth")
 @utils.InKeyOutKey(indefault="labels", outdefault="labels")
 def get_bin_nyu_depth(min_depth=0.001, max_depth=10.0, num_bins=256):
-  """Binning of NYU depth for UViM in preprocessing rather than model."""
+    """Binning of NYU depth for UViM in preprocessing rather than model."""
 
-  def _bin_depth(labels):  # pylint: disable=missing-docstring
-    labels = (labels - min_depth) / (max_depth - min_depth)
-    labels *= num_bins
-    labels = tf.cast(tf.floor(labels), tf.int32)
-    labels = tf.minimum(labels, num_bins - 1)
-    labels = tf.maximum(labels, 0)
-    return labels
+    def _bin_depth(labels):  # pylint: disable=missing-docstring
+        labels = (labels - min_depth) / (max_depth - min_depth)
+        labels *= num_bins
+        labels = tf.cast(tf.floor(labels), tf.int32)
+        labels = tf.minimum(labels, num_bins - 1)
+        labels = tf.maximum(labels, 0)
+        return labels
 
-  return _bin_depth
-
+    return _bin_depth

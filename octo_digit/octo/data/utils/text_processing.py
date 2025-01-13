@@ -30,6 +30,7 @@ class HFTokenizer(TextProcessor):
         encode_with_model: bool = False,
     ):
         from transformers import AutoTokenizer, FlaxAutoModel  # lazy import
+
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.tokenizer_kwargs = tokenizer_kwargs
         self.encode_with_model = encode_with_model
@@ -48,15 +49,20 @@ class HFTokenizer(TextProcessor):
             return dict(inputs)
 
     def decode(self, inputs: Sequence[np.ndarray], **kwargs) -> Sequence[str]:
-        inputs = np.array(inputs, dtype=np.int64) #num_sentences, 16
-        if len(inputs.shape) == 1: 
+        inputs = np.array(inputs, dtype=np.int64)  # num_sentences, 16
+        if len(inputs.shape) == 1:
             inputs = [inputs]
-        elif len(inputs.shape) > 2: 
-            raise ValueError(f'Got inputs of shape {inputs.shape}, should be num_sentences x 16')
+        elif len(inputs.shape) > 2:
+            raise ValueError(
+                f"Got inputs of shape {inputs.shape}, should be num_sentences x 16"
+            )
         decode_kwargs = self.tokenizer_kwargs
         decode_kwargs.update(kwargs)
-        output = [self.tokenizer.decode(input_ids, **decode_kwargs) for input_ids in inputs]
+        output = [
+            self.tokenizer.decode(input_ids, **decode_kwargs) for input_ids in inputs
+        ]
         return output
+
 
 class MuseEmbedding(TextProcessor):
     def __init__(self):

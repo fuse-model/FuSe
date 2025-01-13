@@ -70,67 +70,102 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 
-_CAPTIONS_PATH = '/tmp/data/xm3600'
-_IMAGES_PATH = '/tmp/data/xm3600/images'
+_CAPTIONS_PATH = "/tmp/data/xm3600"
+_IMAGES_PATH = "/tmp/data/xm3600/images"
 
 XM3600_LANGUAGES = [
-    'ar', 'bn', 'cs', 'da', 'de', 'el', 'en', 'es', 'fa', 'fi', 'fil', 'fr',
-    'he', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'mi', 'nl', 'no', 'pl',
-    'pt', 'quz', 'ro', 'ru', 'sv', 'sw', 'te', 'th', 'tr', 'uk', 'vi', 'zh'
+    "ar",
+    "bn",
+    "cs",
+    "da",
+    "de",
+    "el",
+    "en",
+    "es",
+    "fa",
+    "fi",
+    "fil",
+    "fr",
+    "he",
+    "hi",
+    "hr",
+    "hu",
+    "id",
+    "it",
+    "ja",
+    "ko",
+    "mi",
+    "nl",
+    "no",
+    "pl",
+    "pt",
+    "quz",
+    "ro",
+    "ru",
+    "sv",
+    "sw",
+    "te",
+    "th",
+    "tr",
+    "uk",
+    "vi",
+    "zh",
 ]
 
 
 class Xm3600(tfds.core.GeneratorBasedBuilder):
-  """DatasetBuilder for XM3600 dataset."""
+    """DatasetBuilder for XM3600 dataset."""
 
-  VERSION = tfds.core.Version('1.0.1')
-  RELEASE_NOTES = {
-      '1.0.0': 'First release.',
-      '1.0.1': 'Add captions/tokenized feature to compute metrics (eg CIDEr).',
-  }
+    VERSION = tfds.core.Version("1.0.1")
+    RELEASE_NOTES = {
+        "1.0.0": "First release.",
+        "1.0.1": "Add captions/tokenized feature to compute metrics (eg CIDEr).",
+    }
 
-  def _info(self):
-    """Returns the metadata."""
+    def _info(self):
+        """Returns the metadata."""
 
-    return tfds.core.DatasetInfo(
-        builder=self,
-        description=_DESCRIPTION,
-        features=tfds.features.FeaturesDict({
-            'image/id': tfds.features.Text(),
-            'image': tfds.features.Image(encoding_format='jpeg'),
-            'captions': tfds.features.Sequence(tfds.features.Text()),
-            'captions/tokenized': tfds.features.Sequence(tfds.features.Text()),
-            'language': tfds.features.Text(),
-        }),
-        supervised_keys=None,
-        homepage='https://google.github.io/crossmodal-3600/',
-        citation=_CITATION,
-    )
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict(
+                {
+                    "image/id": tfds.features.Text(),
+                    "image": tfds.features.Image(encoding_format="jpeg"),
+                    "captions": tfds.features.Sequence(tfds.features.Text()),
+                    "captions/tokenized": tfds.features.Sequence(tfds.features.Text()),
+                    "language": tfds.features.Text(),
+                }
+            ),
+            supervised_keys=None,
+            homepage="https://google.github.io/crossmodal-3600/",
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Returns SplitGenerators."""
-    return {lang: self._generate_examples(lang) for lang in XM3600_LANGUAGES}
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Returns SplitGenerators."""
+        return {lang: self._generate_examples(lang) for lang in XM3600_LANGUAGES}
 
-  def _generate_examples(self, split: str):
-    """Yields (key, example) tuples from dataset."""
-    language = split
+    def _generate_examples(self, split: str):
+        """Yields (key, example) tuples from dataset."""
+        language = split
 
-    annot_fname = os.path.join(_CAPTIONS_PATH, 'captions.jsonl')
-    data = {}
-    tok_data = {}
-    with open(annot_fname, 'r') as f:
-      for line in f:
-        j = json.loads(line)
-        image_id = f'{j["image/key"]}_{language}'
-        captions = j[language]['caption']
-        data[image_id] = captions
-        tok_data[image_id] = j[language]['caption/tokenized']
+        annot_fname = os.path.join(_CAPTIONS_PATH, "captions.jsonl")
+        data = {}
+        tok_data = {}
+        with open(annot_fname, "r") as f:
+            for line in f:
+                j = json.loads(line)
+                image_id = f'{j["image/key"]}_{language}'
+                captions = j[language]["caption"]
+                data[image_id] = captions
+                tok_data[image_id] = j[language]["caption/tokenized"]
 
-    for image_id, captions in data.items():
-      yield image_id, {
-          'image/id': image_id,
-          'image': os.path.join(_IMAGES_PATH, f'{image_id.split("_")[0]}.jpg'),
-          'captions': captions,
-          'captions/tokenized': tok_data[image_id],
-          'language': language,
-      }
+        for image_id, captions in data.items():
+            yield image_id, {
+                "image/id": image_id,
+                "image": os.path.join(_IMAGES_PATH, f'{image_id.split("_")[0]}.jpg'),
+                "captions": captions,
+                "captions/tokenized": tok_data[image_id],
+                "language": language,
+            }

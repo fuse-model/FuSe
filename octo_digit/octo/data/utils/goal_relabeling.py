@@ -5,9 +5,8 @@ Each function should add entries to the "task" dict.
 
 from typing import Optional
 
-import tensorflow as tf
-
 from octo.data.utils.data_utils import tree_merge
+import tensorflow as tf
 
 
 def uniform(traj: dict, max_goal_distance: Optional[int] = None) -> dict:

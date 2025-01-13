@@ -26,19 +26,19 @@ import tensorflow_datasets as tfds
 
 
 def main(argv):
-  if len(argv) > 1 and "download_tfds_datasets.py" in argv[0]:
-    datasets = argv[1:]
-  else:
-    datasets = [
-        "cifar10",
-        "cifar100",
-        "oxford_iiit_pet",
-        "oxford_flowers102",
-        "imagenet_v2",
-    ]
-  for d in datasets:
-    tfds.load(name=d, download=True)
+    if len(argv) > 1 and "download_tfds_datasets.py" in argv[0]:
+        datasets = argv[1:]
+    else:
+        datasets = [
+            "cifar10",
+            "cifar100",
+            "oxford_iiit_pet",
+            "oxford_flowers102",
+            "imagenet_v2",
+        ]
+    for d in datasets:
+        tfds.load(name=d, download=True)
 
 
 if __name__ == "__main__":
-  app.run(main)
+    app.run(main)

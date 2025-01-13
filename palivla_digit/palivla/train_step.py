@@ -1,15 +1,16 @@
 from functools import partial
 from typing import Dict
+
+import chex
+from dataset import create_fuse_modal_mask, enforce_valid_language_instruction
+from einops import repeat
+from flax.training.train_state import TrainState
 import jax
 import jax.numpy as jnp
-import chex
 import optax
-from flax.training.train_state import TrainState
-from palivla.tokenizer import ActionTokenizer, Tokenizer
 from palivla.load_model import components_by_label
+from palivla.tokenizer import ActionTokenizer, Tokenizer
 from palivla.types import TrainingBatch
-from palivla.dataset import create_fuse_modal_mask, enforce_valid_language_instruction
-from einops import repeat
 
 
 def smooth_nll_loss(logits, labels, sigma, base_action_token, action_vocab_size):
@@ -72,16 +73,22 @@ def compute_action_metrics(
     decoded_actions_gt = detokenize_fn(gt_action_tokens)
 
     batch_size = gt_actions.shape[0]
-    chex.assert_shape((pred_action_tokens, gt_action_tokens), (batch_size, tokenizer_config.num_action_tokens))
+    chex.assert_shape(
+        (pred_action_tokens, gt_action_tokens),
+        (batch_size, tokenizer_config.num_action_tokens),
+    )
     if pred_action_logits is not None:
-        chex.assert_shape((pred_action_logits), (batch_size, tokenizer_config.num_action_tokens, None))
-    chex.assert_shape((gt_actions, decoded_actions_gt, decoded_actions), (batch_size, None, action_dim))
+        chex.assert_shape(
+            (pred_action_logits), (batch_size, tokenizer_config.num_action_tokens, None)
+        )
+    chex.assert_shape(
+        (gt_actions, decoded_actions_gt, decoded_actions),
+        (batch_size, None, action_dim),
+    )
 
     def stats_for_metric(value, name, shape):
         chex.assert_shape(value, (None, shape))
-        return {
-            f"{log_segment_prefix}{name}": jnp.mean(value),
-        } | {
+        return {f"{log_segment_prefix}{name}": jnp.mean(value),} | {
             f"_details/{log_segment_prefix}{name}_{i}": jnp.mean(value[:, i])
             for i in range(shape)
         }
@@ -90,11 +97,14 @@ def compute_action_metrics(
     tokenization_error = gt_actions - decoded_actions_gt
 
     if tokenizer_config.min_action_value is not None:
-        tokenization_error = jnp.clip(
-            gt_actions,
-            tokenizer_config.min_action_value,
-            tokenizer_config.max_action_value
-        ) - decoded_actions_gt
+        tokenization_error = (
+            jnp.clip(
+                gt_actions,
+                tokenizer_config.min_action_value,
+                tokenizer_config.max_action_value,
+            )
+            - decoded_actions_gt
+        )
 
     return {
         **stats_for_metric(jnp.mean(jnp.abs(error), axis=1), "l1", action_dim),
@@ -106,7 +116,9 @@ def compute_action_metrics(
             jnp.mean(jnp.square(tokenization_error), axis=1), "tok_l2", action_dim
         ),
         **stats_for_metric(
-            pred_action_tokens == gt_action_tokens, "acc", tokenizer_config.num_action_tokens
+            pred_action_tokens == gt_action_tokens,
+            "acc",
+            tokenizer_config.num_action_tokens,
         ),
     } | (
         {
@@ -115,7 +127,7 @@ def compute_action_metrics(
                     pred_action_logits, gt_action_tokens
                 ),
                 "action_loss",
-                tokenizer_config.num_action_tokens
+                tokenizer_config.num_action_tokens,
             ),
         }
         if pred_action_logits is not None
@@ -123,29 +135,31 @@ def compute_action_metrics(
     )
 
 
-def compute_fuse_metrics(
-    pred_logits,
-    labels,
-    tokenizer_config,
-    log_segment_prefix
-):
+def compute_fuse_metrics(pred_logits, labels, tokenizer_config, log_segment_prefix):
     batch_size, seq_len, num_logits = pred_logits.shape
 
     # extract text tokens
-    end_of_text_token = repeat(jnp.argmax(labels == tokenizer_config.begin_of_action_token, axis=-1), "b-> b s", s=seq_len)
-    is_prompt_mask = repeat(jnp.arange(seq_len), "i -> b i", b=batch_size) < end_of_text_token 
+    end_of_text_token = repeat(
+        jnp.argmax(labels == tokenizer_config.begin_of_action_token, axis=-1),
+        "b-> b s",
+        s=seq_len,
+    )
+    is_prompt_mask = (
+        repeat(jnp.arange(seq_len), "i -> b i", b=batch_size) < end_of_text_token
+    )
 
     pred_tokens = jnp.argmax(pred_logits, axis=-1)
     acc = (pred_tokens == labels) * is_prompt_mask
     total_acc = jnp.sum(acc, axis=-1) / jnp.sum(is_prompt_mask, axis=-1)
     total_acc = jnp.mean(total_acc)
 
-    metrics = {
-        f"{log_segment_prefix}acc": total_acc,
-    } | {
-        f"_details/{log_segment_prefix}acc_{i}": jnp.sum(acc[:, i]) / (jnp.sum(is_prompt_mask[:, i]) + 1e-5) for i in range(10)
+    metrics = {f"{log_segment_prefix}acc": total_acc,} | {
+        f"_details/{log_segment_prefix}acc_{i}": jnp.sum(acc[:, i])
+        / (jnp.sum(is_prompt_mask[:, i]) + 1e-5)
+        for i in range(10)
     }
     return metrics
+
 
 def compute_stats(
     *,
@@ -156,14 +170,17 @@ def compute_stats(
     mask_loss,
     tokenizer_config: Tokenizer.TokenizerConfig,
     log_segment_prefix: str = "",
-    fuse_step: bool = False
+    fuse_step: bool = False,
 ):
     output_pred_mask = mask_loss[..., 1:]
     labels = tokens[..., 1:]
 
     if not fuse_step:
         action_token_info = get_action_tokens(
-            pred_logits, labels, tokenizer_config.num_action_tokens, tokenizer_config.begin_of_action_token
+            pred_logits,
+            labels,
+            tokenizer_config.num_action_tokens,
+            tokenizer_config.begin_of_action_token,
         )
         metrics = compute_action_metrics(
             detokenize_fn,
@@ -178,9 +195,8 @@ def compute_stats(
             pred_logits=pred_logits,
             labels=labels,
             tokenizer_config=tokenizer_config,
-            log_segment_prefix=log_segment_prefix
+            log_segment_prefix=log_segment_prefix,
         )
-    
 
     loss = jnp.mean(
         output_pred_mask
@@ -204,13 +220,23 @@ def step_fn(
         all_inputs = batch.sensors | {"text": batch.tokens[..., :-1]}
         if fuse_step:
             sensor_masks = batch.modal_mask | {
-                "modality_idx": jnp.squeeze(jnp.ones_like(batch.sensors["modality_idx"], dtype=jnp.bool_), axis=-1),
+                "modality_idx": jnp.squeeze(
+                    jnp.ones_like(batch.sensors["modality_idx"], dtype=jnp.bool_),
+                    axis=-1,
+                ),
             }
-            mask_loss = enforce_valid_language_instruction(batch, batch.tokens_loss_fuse)
+            mask_loss = enforce_valid_language_instruction(
+                batch.tokens_loss_fuse,
+                batch.modality_idx,
+                jnp.squeeze(batch.mic_mask, axis=-1),
+            )
             ar_mask = batch.tokens_ar_fuse
-        else:   
+        else:
             sensor_masks = batch.sensors_mask | {
-                "modality_idx": jnp.squeeze(jnp.zeros_like(batch.sensors["modality_idx"], dtype=jnp.bool_), axis=-1),
+                "modality_idx": jnp.squeeze(
+                    jnp.zeros_like(batch.sensors["modality_idx"], dtype=jnp.bool_),
+                    axis=-1,
+                ),
             }
             mask_loss = batch.tokens_loss
             ar_mask = batch.tokens_ar
@@ -235,7 +261,7 @@ def step_fn(
             mask_loss=mask_loss,
             tokenizer_config=tokenizer_config,
             log_segment_prefix="train/tf_" if not fuse_step else "train/fuse_",
-            fuse_step=fuse_step
+            fuse_step=fuse_step,
         )
 
     grad_fn = jax.grad(loss_fn, has_aux=True)

@@ -37,7 +37,6 @@ import os
 import numpy as np
 import tensorflow_datasets as tfds
 
-
 _DESCRIPTION = """ChartQA dataset."""
 
 # pylint: disable=line-too-long
@@ -66,57 +65,62 @@ _CITATION = """
 # pylint: enable=line-too-long
 
 # When running locally (recommended), copy files as above an use these:
-_CHARTQA_PATH = '/tmp/data/ChartQA Dataset/'
+_CHARTQA_PATH = "/tmp/data/ChartQA Dataset/"
 
 
 class ChartQAConfig(tfds.core.BuilderConfig):
-  """Configuration to build the dataset."""
-  pass
+    """Configuration to build the dataset."""
+
+    pass
 
 
 class ChartQA(tfds.core.GeneratorBasedBuilder):
-  """DatasetBuilder for ChartQA dataset."""
+    """DatasetBuilder for ChartQA dataset."""
 
-  VERSION = tfds.core.Version('1.0.0')
-  RELEASE_NOTES = {'1.0.0': 'First release.'}
-  BUILDER_CONFIGS = [
-      ChartQAConfig(name='human', description='Human set'),
-      ChartQAConfig(name='augmented', description='Augmented set'),
-  ]
+    VERSION = tfds.core.Version("1.0.0")
+    RELEASE_NOTES = {"1.0.0": "First release."}
+    BUILDER_CONFIGS = [
+        ChartQAConfig(name="human", description="Human set"),
+        ChartQAConfig(name="augmented", description="Augmented set"),
+    ]
 
-  def _info(self):
-    """Returns the metadata."""
-    return tfds.core.DatasetInfo(
-        builder=self,
-        description=_DESCRIPTION,
-        features=tfds.features.FeaturesDict({
-            'question_id': tfds.features.Scalar(np.int32),
-            'image/filename': tfds.features.Text(),
-            'image': tfds.features.Image(encoding_format='png'),
-            'question': tfds.features.Text(),
-            'answer': tfds.features.Text(),
-        }),
-        homepage='https://github.com/vis-nlp/ChartQA',
-        citation=_CITATION,
-    )
+    def _info(self):
+        """Returns the metadata."""
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict(
+                {
+                    "question_id": tfds.features.Scalar(np.int32),
+                    "image/filename": tfds.features.Text(),
+                    "image": tfds.features.Image(encoding_format="png"),
+                    "question": tfds.features.Text(),
+                    "answer": tfds.features.Text(),
+                }
+            ),
+            homepage="https://github.com/vis-nlp/ChartQA",
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Returns SplitGenerators."""
-    return {split: self._generate_examples(split, self.builder_config.name)
-            for split in ('val', 'train', 'test')}
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Returns SplitGenerators."""
+        return {
+            split: self._generate_examples(split, self.builder_config.name)
+            for split in ("val", "train", "test")
+        }
 
-  def _generate_examples(self, split: str, source: str):
-    """Yields (key, example) tuples from test set."""
-    annot_fname = os.path.join(_CHARTQA_PATH, split, f'{split}_{source}.json')
+    def _generate_examples(self, split: str, source: str):
+        """Yields (key, example) tuples from test set."""
+        annot_fname = os.path.join(_CHARTQA_PATH, split, f"{split}_{source}.json")
 
-    with open(annot_fname, 'r') as f:
-      data = json.loads(f.read())
+        with open(annot_fname, "r") as f:
+            data = json.loads(f.read())
 
-    for idx, v in enumerate(data):
-      yield idx, {
-          'question_id': idx,
-          'image/filename': v['imgname'],
-          'image': os.path.join(_CHARTQA_PATH, split, 'png', v['imgname']),
-          'question': v['query'],
-          'answer': v['label'],
-      }
+        for idx, v in enumerate(data):
+            yield idx, {
+                "question_id": idx,
+                "image/filename": v["imgname"],
+                "image": os.path.join(_CHARTQA_PATH, split, "png", v["imgname"]),
+                "question": v["query"],
+                "answer": v["label"],
+            }

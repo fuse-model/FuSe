@@ -14,40 +14,42 @@
 
 """Tests for preprocessing utils."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 from big_vision.pp import utils
 import tensorflow.compat.v1 as tf
 
 
 class UtilsTest(tf.test.TestCase):
+    def test_maybe_repeat(self):
+        self.assertEqual((1, 1, 1), utils.maybe_repeat(1, 3))
+        self.assertEqual((1, 2), utils.maybe_repeat((1, 2), 2))
+        self.assertEqual([1, 2], utils.maybe_repeat([1, 2], 2))
 
-  def test_maybe_repeat(self):
-    self.assertEqual((1, 1, 1), utils.maybe_repeat(1, 3))
-    self.assertEqual((1, 2), utils.maybe_repeat((1, 2), 2))
-    self.assertEqual([1, 2], utils.maybe_repeat([1, 2], 2))
+    def test_inkeyoutkey(self):
+        @utils.InKeyOutKey()
+        def get_pp_fn(shift, scale=0):
+            def _pp_fn(x):
+                return scale * x + shift
 
-  def test_inkeyoutkey(self):
-    @utils.InKeyOutKey()
-    def get_pp_fn(shift, scale=0):
-      def _pp_fn(x):
-        return scale * x + shift
-      return _pp_fn
+            return _pp_fn
 
-    data = {"k_in": 2, "other": 3}
-    ppfn = get_pp_fn(1, 2, inkey="k_in", outkey="k_out")  # pylint: disable=unexpected-keyword-arg
-    self.assertEqual({"k_in": 2, "k_out": 5, "other": 3}, ppfn(data))
+        data = {"k_in": 2, "other": 3}
+        ppfn = get_pp_fn(
+            1, 2, inkey="k_in", outkey="k_out"
+        )  # pylint: disable=unexpected-keyword-arg
+        self.assertEqual({"k_in": 2, "k_out": 5, "other": 3}, ppfn(data))
 
-    data = {"k": 6, "other": 3}
-    ppfn = get_pp_fn(1, inkey="k", outkey="k")  # pylint: disable=unexpected-keyword-arg
-    self.assertEqual({"k": 1, "other": 3}, ppfn(data))
+        data = {"k": 6, "other": 3}
+        ppfn = get_pp_fn(
+            1, inkey="k", outkey="k"
+        )  # pylint: disable=unexpected-keyword-arg
+        self.assertEqual({"k": 1, "other": 3}, ppfn(data))
 
-    data = {"other": 6, "image": 3}
-    ppfn = get_pp_fn(5, 2)
-    self.assertEqual({"other": 6, "image": 11}, ppfn(data))
+        data = {"other": 6, "image": 3}
+        ppfn = get_pp_fn(5, 2)
+        self.assertEqual({"other": 6, "image": 11}, ppfn(data))
 
 
 if __name__ == "__main__":
-  tf.test.main()
+    tf.test.main()

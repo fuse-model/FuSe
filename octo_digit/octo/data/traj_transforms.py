@@ -3,7 +3,9 @@ Contains trajectory transforms used in the octo data pipeline. Trajectory transf
 that represents a single trajectory, meaning each tensor has the same leading dimension (the trajectory
 length).
 """
-from typing import Optional
+import re
+from typing import Optional, Sequence
+
 import tensorflow as tf
 
 
@@ -119,7 +121,7 @@ def zero_out_future_proprio(traj: dict) -> dict:
     return traj
 
 
-def add_pad_mask_dict(traj: dict) -> dict:
+def add_pad_mask_dict(traj: dict, correct_mic_mask: bool = False) -> dict:
     """Adds a dictionary indicating which elements of the observation/task should be treated as padding.
 
     traj["observation"|"task"]["pad_mask_dict"] = {k: traj["observation"|"task"][k] is not padding}
@@ -128,20 +130,20 @@ def add_pad_mask_dict(traj: dict) -> dict:
     for key in ["observation", "task"]:
         pad_mask_dict = {}
         for subkey in traj[key]:
-            if isinstance(traj[key][subkey], dict): 
-                pad_mask_dict[subkey] = True 
+            if isinstance(traj[key][subkey], dict):
+                pad_mask_dict[subkey] = True
             elif traj[key][subkey].dtype == tf.string:
                 # handles "language_instruction", "image_*", and "depth_*"
                 pad_mask_dict[subkey] = tf.strings.length(traj[key][subkey]) != 0
+            elif correct_mic_mask and subkey == "mel_spectro":
+                pad_mask_dict[subkey] = tf.logical_and(
+                    tf.math.reduce_all(tf.cast(traj[key]["mic_mask"], tf.bool)),
+                    tf.ones([traj_len], dtype=tf.bool),
+                )
             else:
                 # all other keys should not be treated as padding
                 pad_mask_dict[subkey] = tf.ones([traj_len], dtype=tf.bool)
         traj[key]["pad_mask_dict"] = pad_mask_dict
-
-    # special case for "has_mel_spectro"
-    if "mel_spectro" in traj["observation"]:
-        traj["observation"]["pad_mask_dict"]["mel_spectro"] = tf.logical_and(tf.math.reduce_all(tf.cast(traj["has_mel_spectro"], tf.bool)), traj["observation"]["pad_mask_dict"]["mel_spectro"])
-    del traj["has_mel_spectro"]
     return traj
 
 

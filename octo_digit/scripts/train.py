@@ -14,10 +14,6 @@ import jax
 from jax.experimental import multihost_utils
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
-import optax
-import tqdm
-import wandb
-
 import octo
 from octo.data.dataset import make_interleaved_dataset
 from octo.data.oxe import make_oxe_dataset_kwargs_and_weights
@@ -39,6 +35,9 @@ from octo.utils.train_utils import (
     TrainState,
 )
 from octo.utils.typing import Data
+import optax
+import tqdm
+import wandb
 
 FLAGS = flags.FLAGS
 

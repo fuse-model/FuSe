@@ -1,13 +1,13 @@
 import math
-from typing import List, Sequence, Tuple, Optional, Literal
-from einops import einops, rearrange
+from typing import List, Literal, Optional, Sequence, Tuple
 
-import jax
-import jax.numpy as jnp
 import chex
 import distrax
+from einops import einops, rearrange
 from flax import linen as nn
 from flax.struct import dataclass
+import jax
+import jax.numpy as jnp
 
 
 class FsqCodebook(nn.Module):
@@ -127,6 +127,7 @@ class FsqCodebook(nn.Module):
     def vocab_size(self):
         return math.prod(self.bins_per_dim)
 
+
 class ResNetDownBlock(nn.Module):
     stride: int = 1
     n_filters: int = 64
@@ -148,6 +149,7 @@ class ResNetDownBlock(nn.Module):
 
         return skip + x
 
+
 class ResNetUpBlock(nn.Module):
     stride: int = 1
     n_filters: int = 64
@@ -159,7 +161,9 @@ class ResNetUpBlock(nn.Module):
         skip = x
 
         if self.stride > 1:
-            skip = nn.ConvTranspose(self.n_filters, (self.stride,), (self.stride,), "SAME")(skip)
+            skip = nn.ConvTranspose(
+                self.n_filters, (self.stride,), (self.stride,), "SAME"
+            )(skip)
 
         x = nn.ConvTranspose(self.n_filters, (3,), (self.stride,), "SAME")(x)
         x = nn.GroupNorm(num_groups=self.n_filters // self.group_size)(x)
@@ -199,7 +203,9 @@ class LookupFreeQuantization(nn.Module):
         return tokens
 
     def decode(self, tokens):
-        token_bits = (tokens[..., None] & (2 ** jnp.arange(self.num_dims))).astype(jnp.int32)
+        token_bits = (tokens[..., None] & (2 ** jnp.arange(self.num_dims))).astype(
+            jnp.int32
+        )
         return self.project_up(self.codebook[token_bits])
 
     def loss(self, x):
@@ -209,18 +215,22 @@ class LookupFreeQuantization(nn.Module):
         token_squared_distances = jnp.square(z[..., None] - self.codebook)
         tokens = jnp.argmin(token_squared_distances, axis=-1)
 
-        token_bit_log_probs = -token_squared_distances # jax.nn.log_softmax(-token_squared_distances, axis=-1)
+        token_bit_log_probs = (
+            -token_squared_distances
+        )  # jax.nn.log_softmax(-token_squared_distances, axis=-1)
         # Compute token log probs for tokens 0..2^num_dims-1 by summing corresponding log-probs
         token_bit_expansions = jnp.bitwise_and(
-            jnp.arange(2 ** self.num_dims)[None, :],
-            2 ** jnp.arange(self.num_dims)[:, None]
+            jnp.arange(2**self.num_dims)[None, :],
+            2 ** jnp.arange(self.num_dims)[:, None],
         ).astype(jnp.int32)
         token_log_probs = (
-            token_bit_log_probs[..., 0] @ (1 - token_bit_expansions) +
-            token_bit_log_probs[..., 1] @ token_bit_expansions
-        ) # (batch_size, num_tokens, 2 ** num_dims)
-        token_log_probs = jax.lax.stop_gradient(jax.nn.log_softmax(token_log_probs, axis=-1))
-        chex.assert_shape(token_log_probs, (*x.shape[:-1], 2 ** self.num_dims))
+            token_bit_log_probs[..., 0] @ (1 - token_bit_expansions)
+            + token_bit_log_probs[..., 1] @ token_bit_expansions
+        )  # (batch_size, num_tokens, 2 ** num_dims)
+        token_log_probs = jax.lax.stop_gradient(
+            jax.nn.log_softmax(token_log_probs, axis=-1)
+        )
+        chex.assert_shape(token_log_probs, (*x.shape[:-1], 2**self.num_dims))
 
         z_q = self.codebook[tokens]
         commit_loss = jnp.square(z - z_q).mean()
@@ -229,7 +239,9 @@ class LookupFreeQuantization(nn.Module):
         z_q = self.project_up(z_q)
         z = self.project_up(z)
 
-        tokens = jnp.sum(tokens * (len(self.codebook) ** jnp.arange(self.num_dims)), axis=-1)
+        tokens = jnp.sum(
+            tokens * (len(self.codebook) ** jnp.arange(self.num_dims)), axis=-1
+        )
         return LfqCodebookOutput(
             tokens=tokens,
             z=z,
@@ -305,13 +317,14 @@ def sinusoidal_pe_init(_, shape):
     seq_len, d_embed = shape
 
     position = jnp.arange(0, seq_len, 1)
-    div_term = jnp.exp(
-        jnp.arange(0, d_embed, 2) * -(jnp.log(10000.0) / d_embed)
+    div_term = jnp.exp(jnp.arange(0, d_embed, 2) * -(jnp.log(10000.0) / d_embed))
+    pe = jnp.concatenate(
+        [
+            jnp.sin(position[:, jnp.newaxis] * div_term),
+            jnp.cos(position[:, jnp.newaxis] * div_term),
+        ],
+        axis=-1,
     )
-    pe = jnp.concatenate([
-        jnp.sin(position[:, jnp.newaxis] * div_term),
-        jnp.cos(position[:, jnp.newaxis] * div_term),
-    ], axis=-1)
     return pe
 
 
@@ -326,9 +339,7 @@ class TokenizerEncoderDecoder(nn.Module):
 
     @nn.compact
     def __call__(self, y, *, train=True, state_conditioning=None, mask=None):
-        x = self.param(
-            "q_embed", sinusoidal_pe_init, (self.num_tokens, y.shape[-1])
-        )
+        x = self.param("q_embed", sinusoidal_pe_init, (self.num_tokens, y.shape[-1]))
         x = jax.numpy.broadcast_to(x, y.shape[:-2] + x.shape[-2:])
 
         if mask is not None:
@@ -336,18 +347,28 @@ class TokenizerEncoderDecoder(nn.Module):
             chex.assert_equal_shape([y[..., 0], mask])
             attn_mask = einops.repeat(mask, "... kv -> ... 1 q kv", q=self.num_tokens)
         else:
-            attn_mask = jnp.ones(y.shape[:-2] + (1, self.num_tokens, self.num_cross_tokens))
+            attn_mask = jnp.ones(
+                y.shape[:-2] + (1, self.num_tokens, self.num_cross_tokens)
+            )
 
         if self.use_state_conditioning:
-            assert state_conditioning is not None, "State conditioning is required for this model."
-            state_embed = nn.Dense(y.shape[-1], name="state_proj")(state_conditioning)[..., None, :]
+            assert (
+                state_conditioning is not None
+            ), "State conditioning is required for this model."
+            state_embed = nn.Dense(y.shape[-1], name="state_proj")(state_conditioning)[
+                ..., None, :
+            ]
             y = jnp.concatenate([y, state_embed], axis=-2)
-            attn_mask = jnp.concatenate([attn_mask, jnp.ones_like(attn_mask[..., 0:1])], axis=-1)
+            attn_mask = jnp.concatenate(
+                [attn_mask, jnp.ones_like(attn_mask[..., 0:1])], axis=-1
+            )
 
         y = y + self.param("y_pos_enc", sinusoidal_pe_init, y.shape[-2:])
 
         for _ in range(self.num_layers):
-            x = CrossAttentionLayer(causal=self.causal, mlp_ratio=self.mlp_ratio)(x, y, train=train, mask_self=None, mask_cross=attn_mask)
+            x = CrossAttentionLayer(causal=self.causal, mlp_ratio=self.mlp_ratio)(
+                x, y, train=train, mask_self=None, mask_cross=attn_mask
+            )
 
         return x
 
@@ -408,7 +429,9 @@ class FsqAttentionTokenizer(nn.Module):
         return self.codebook.encode(x)
 
     def detokenize(self, tokens, *, obs=None):
-        x = self.decoder(self.codebook.decode(tokens[..., None]), state_conditioning=obs)
+        x = self.decoder(
+            self.codebook.decode(tokens[..., None]), state_conditioning=obs
+        )
         mean = self.proj_mean(x)
         mean = mean * self.out_scale
 
@@ -433,7 +456,7 @@ class FsqAttentionTokenizer(nn.Module):
             "mse": mse,
             "mae": mae,
         }
-    
+
     def __call__(self, *args, **kwargs):
         """
         Dummy for .init
@@ -453,7 +476,7 @@ class LfqResnetTokenizer(nn.Module):
     commit_loss_weight: float = 0.0
     entropy_loss_weight: float = 0.05
 
-    use_initial_offset: bool = False # Unused
+    use_initial_offset: bool = False  # Unused
     use_state_conditioning: bool = False
 
     @property
@@ -472,19 +495,25 @@ class LfqResnetTokenizer(nn.Module):
         encoder_layers.append(nn.Conv(self.stage_filters[0], (7,), (1,), "SAME"))
         for num_blocks, n_filters in zip(self.stages, self.stage_filters):
             for i in range(num_blocks):
-                encoder_layers.append(ResNetDownBlock(
-                    stride=2 if i == 0 else 1,
-                    n_filters=n_filters,
-                ))
+                encoder_layers.append(
+                    ResNetDownBlock(
+                        stride=2 if i == 0 else 1,
+                        n_filters=n_filters,
+                    )
+                )
         self.encoder_layers = encoder_layers
 
         decoder_layers = []
-        for num_blocks, n_filters in zip(reversed(self.stages), reversed(self.stage_filters)):
+        for num_blocks, n_filters in zip(
+            reversed(self.stages), reversed(self.stage_filters)
+        ):
             for i in range(num_blocks):
-                decoder_layers.append(ResNetUpBlock(
-                    stride=2 if i == 0 else 1,
-                    n_filters=n_filters,
-                ))
+                decoder_layers.append(
+                    ResNetUpBlock(
+                        stride=2 if i == 0 else 1,
+                        n_filters=n_filters,
+                    )
+                )
         decoder_layers.append(nn.ConvTranspose(self.data_dim, (7,), (1,), "SAME"))
         self.decoder_layers = decoder_layers
 
@@ -534,7 +563,14 @@ class LfqResnetTokenizer(nn.Module):
         """
         return self.loss(*args, **kwargs)
 
-    def loss(self, action, obs=None, train=True, action_padding_mask=None, return_recon: bool = False):
+    def loss(
+        self,
+        action,
+        obs=None,
+        train=True,
+        action_padding_mask=None,
+        return_recon: bool = False,
+    ):
         z = self._encoder(action, train=train)
         codebook_output = self.codebook.loss(z)
         action_recon = self._decoder(codebook_output.z_q, train=train) * self.out_scale
@@ -553,7 +589,7 @@ class LfqResnetTokenizer(nn.Module):
         # sample_entropy = -jnp.sum(jnp.where(token_probs > 1e-6, token_probs * token_log_probs, 0), axis=-1).mean()
         # token_marginal_probs = jnp.mean(token_probs, axis=all_but_last_two)
         # marginal_entropy = -jnp.sum(jnp.where(token_marginal_probs > 1e-6, token_marginal_probs * jnp.log(token_marginal_probs), 0), axis=-1).mean()
-        entropy_loss = 0 # sample_entropy - marginal_entropy
+        entropy_loss = 0  # sample_entropy - marginal_entropy
 
         loss = (
             self.l2_loss_weight * mse_loss

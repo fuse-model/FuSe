@@ -1,15 +1,17 @@
+from ml_collections.config_dict import ConfigDict, FieldReference, placeholder
 from octo.data.utils.data_utils import NormalizationType
-from ml_collections.config_dict import placeholder, ConfigDict, FieldReference
-
 from palivla.spec import ModuleSpec
 
 placeholder(int)._value
 
+
 def get_config():
     from palivla.model import get_default_config
+
     num_train_steps = FieldReference(100000, int)
 
     from big_vision.models.ppp.gemma import get_config
+
     variant = "gemma_2b"
     llm_embdim = get_config(variant).width
 
@@ -46,17 +48,30 @@ def get_config():
             "num_proprio_tokens": 4,
             "resume_from_checkpoint_dir": placeholder(str),
             "resume_from_checkpoint_step": placeholder(int),
-            "image_keys": ["image_primary", "image_secondary", "image_wrist_left", "image_wrist_right"],
+            "image_keys": [
+                "image_primary",
+                "image_secondary",
+                "image_wrist_left",
+                "image_wrist_right",
+            ],
             "chunk_relative_actions": True,
-            "model_config": {"palivla_model_config": model_config, "prompt_autoregressive": False},
+            "model_config": {
+                "palivla_model_config": model_config,
+                "prompt_autoregressive": False,
+            },
             "dataset_kwargs": {
                 "oxe_kwargs": {
                     "data_mix": "aloha",
                     "data_dir": "/data/rlds",
-                    "load_camera_views": ["primary", "secondary", "wrist_left", "wrist_right"],
+                    "load_camera_views": [
+                        "primary",
+                        "secondary",
+                        "wrist_left",
+                        "wrist_right",
+                    ],
                     "load_depth": False,
                     "load_proprio": True,
-                    "load_language": False, # Because we don't want to overwrite the language key
+                    "load_language": False,  # Because we don't want to overwrite the language key
                     "force_recompute_dataset_statistics": False,
                     "action_proprio_normalization_type": NormalizationType.NONE,
                 },
@@ -66,7 +81,12 @@ def get_config():
                 },
                 "frame_transform_kwargs": {
                     "image_augment_kwargs": {},
-                    "resize_size": {"primary": [224, 224], "secondary": [224, 224], "wrist_left": [224, 224], "wrist_right": [224, 224]},
+                    "resize_size": {
+                        "primary": [224, 224],
+                        "secondary": [224, 224],
+                        "wrist_left": [224, 224],
+                        "wrist_right": [224, 224],
+                    },
                     "num_parallel_calls": 64,
                 },
                 "balance_weights": True,

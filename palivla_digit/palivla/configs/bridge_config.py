@@ -1,9 +1,9 @@
+from ml_collections.config_dict import ConfigDict, FieldReference, placeholder
 from octo.data.utils.data_utils import NormalizationType
-from ml_collections.config_dict import placeholder, ConfigDict, FieldReference
-
 from palivla.model import get_default_config
 
 placeholder(int)._value
+
 
 def get_config():
     num_train_steps = FieldReference(100000, int)
@@ -82,6 +82,6 @@ def get_config():
                     "weight_decay": 5e-6,
                     "grad_norm_clip": 10.0,
                 },
-            }
+            },
         }
     )

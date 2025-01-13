@@ -1,8 +1,7 @@
+import importlib
 import logging
 import re
-from typing import Dict, Optional, Sequence, Any, Union
-import importlib
-
+from typing import Any, Dict, Optional, Sequence, Union
 
 import flax
 import flax.linen as nn
@@ -10,7 +9,6 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 import numpy as np
-
 from octo.model.components.base import TokenGroup
 from octo.model.components.transformer import MAPHead
 from octo.utils.spec import ModuleSpec
@@ -106,18 +104,22 @@ class ImageTokenizer(nn.Module):
             extracted_outputs = []
             for key in keys:
                 obs_input = inputs[key]
-                if self.add_channel_dim: 
+                if self.add_channel_dim:
                     obs_input = obs_input[..., None]
                 elif self.repeat_channel_dim:
-                    obs_input = jnp.broadcast_to(obs_input[..., None], obs_input.shape + (3,))
+                    obs_input = jnp.broadcast_to(
+                        obs_input[..., None], obs_input.shape + (3,)
+                    )
                 if check_spatial:
                     assert len(obs_input.shape) >= 4
                 extracted_outputs.append(obs_input)
             return jnp.concatenate(extracted_outputs, axis=-1)
 
         obs_stack_keys = regex_filter(self.obs_stack_keys, sorted(observations.keys()))
-        if self.exclude_backgrounds: 
-            obs_stack_keys = [key for key in obs_stack_keys if not key.endswith('background')]
+        if self.exclude_backgrounds:
+            obs_stack_keys = [
+                key for key in obs_stack_keys if not key.endswith("background")
+            ]
         if len(obs_stack_keys) == 0:
             logging.info(
                 f"No image inputs matching {self.obs_stack_keys} were found."
@@ -161,10 +163,12 @@ class ImageTokenizer(nn.Module):
 
         # run visual encoder
         encoder_def = ModuleSpec.instantiate(self.encoder)()
-        image_tokens = encoder_def(enc_inputs, **encoder_input_kwargs) # (b * t, n_tok, dim) for encoders from vit_encoders, (b*t, dim) for encoders from tvl_vit
-        if image_tokens.ndim == 2: 
+        image_tokens = encoder_def(
+            enc_inputs, **encoder_input_kwargs
+        )  # (b * t, n_tok, dim) for encoders from vit_encoders, (b*t, dim) for encoders from tvl_vit
+        if image_tokens.ndim == 2:
             image_tokens = image_tokens[:, None, :]
-        
+
         image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
 
         if self.use_token_learner:
@@ -282,6 +286,42 @@ class ImageTokenizerConcatTokens(nn.Module):
         return TokenGroup(image_tokens, pad_mask)
 
 
+class UnsqueezingImageTokenizer(ImageTokenizer):
+    """Wrapper around ImageTokenizer; unsqueezes last dimension of a 1-channel image (e.g. spectrogram or depth).
+
+    Args:
+        encoder (ModuleSpec): Encoder class.
+        use_token_learner (bool): Whether to use token learner. Defaults to False.
+        num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
+        obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
+        task_stack_keys (Sequence[str]): Which spatial task inputs get stacked for encoder input. Supports regex.
+        task_film_keys (Sequence[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
+    """
+
+    encoder: ModuleSpec
+    use_token_learner: bool = False
+    num_tokens: int = 8
+    conditioning_type: str = "none"
+    obs_stack_keys: Sequence[str] = ("image_.*", "depth_.*")
+    task_stack_keys: Sequence[str] = tuple()
+    task_film_keys: Sequence[str] = tuple()
+    proper_pad_mask: bool = True
+
+    @nn.compact
+    def __call__(
+        self,
+        observations,
+        tasks=None,
+        train: bool = True,
+    ):
+        obs_stack_keys = regex_filter(self.obs_stack_keys, sorted(observations.keys()))
+        for key in obs_stack_keys:
+            obs = observations[key]
+            if len(obs.shape) == 4:  # reshape spectrogram
+                observations[key] = obs[..., None]
+        return super().__call__(observations, tasks=tasks, train=train)
+
+
 class LanguageTokenizer(nn.Module):
     """
     Language tokenizer that embeds text input IDs into continuous language embeddings. Supports pre-trained HF models.
@@ -329,11 +369,10 @@ class LanguageTokenizer(nn.Module):
                 tokens = tasks["language_instruction"][:, None, :]
             else:
                 tokens = tasks["language_instruction"]
-                
+
             if self.repeat_tokens_window:
-                tokens = tokens[:, None, :, :] # add window dimension
+                tokens = tokens[:, None, :, :]  # add window dimension
                 tokens = jnp.tile(tokens, (1, self.repeat_tokens_window, 1, 1))
-                
 
         if not self.finetune_encoder:
             tokens = jax.lax.stop_gradient(tokens)
@@ -433,68 +472,74 @@ class LowdimObsTokenizer(BinTokenizer):
         mask = jnp.ones(tokens.shape[:-1])
         return TokenGroup(tokens, mask)
 
+
 class ProjectionTokenizer(LowdimObsTokenizer):
     """
-    Wrapper to apply TokenLearner dimension reduction to LowdimObs for higher-dimension, non-spatial observations 
+    Wrapper to apply TokenLearner dimension reduction to LowdimObs for higher-dimension, non-spatial observations
 
     Args:
         obs_keys (Sequence[str]): List of non-spatial keys to concatenate & tokenize. Supports regex.
         discretize (bool): If True, discretizes inputs per dimension, see BinTokenizer.
     """
+
     num_output_tokens: int = 7
     obs_keys: Sequence[str] = tuple()
     num_hidden_layers: int = 1
     hidden_size: int = 512
     discretize: bool = False
     proper_pad_mask: bool = True
-    
+
     @nn.compact
     def __call__(self, observations, *unused_args, **unused_kwargs):
-        obs_size = None 
-        projection_inputs = [] 
+        obs_size = None
+        projection_inputs = []
         projection_keys = {}
         for o_key in self.obs_keys:
-            for i, key in enumerate(filter(re.compile(o_key).match, sorted(observations.keys()))):
+            for i, key in enumerate(
+                filter(re.compile(o_key).match, sorted(observations.keys()))
+            ):
                 curr_obs_size = observations[key].shape[-1]
-                assert obs_size is None or obs_size == curr_obs_size, "All observations must have same size."
+                assert (
+                    obs_size is None or obs_size == curr_obs_size
+                ), "All observations must have same size."
                 obs_size = curr_obs_size
                 projection_inputs.append(observations[key])
                 projection_keys[key] = i
-        
+
         projection = jnp.stack(projection_inputs)
-        for i in range(self.num_hidden_layers): 
+        for i in range(self.num_hidden_layers):
             projection = nn.Dense(features=self.hidden_size)(projection)
             projection = nn.relu(projection)
         projection = nn.Dense(features=self.num_output_tokens)(projection)
-        
-        pass_observations = {} 
-        for key in observations.keys(): 
-            if key in projection_keys: 
+
+        pass_observations = {}
+        for key in observations.keys():
+            if key in projection_keys:
                 pass_observations[key] = projection[projection_keys[key]]
-            else: 
+            else:
                 pass_observations[key] = observations[key]
         return super().__call__(pass_observations, *unused_args, **unused_kwargs)
-        
 
 
 class SiglipTokenizer(LowdimObsTokenizer):
-    image: Optional[Any] = None # dict(variant='B/16', pool_type='map')
+    image: Optional[Any] = None  # dict(variant='B/16', pool_type='map')
     image_model: str = "vit"
-    encoder_path: str = '/home/siglip.npz:img'
+    encoder_path: str = "/home/sjosh/nfs/octo_digit/siglip.npz:img"
     num_output_tokens: int = 7
-    obs_stack_keys: Sequence[str] = ("image_digit_left")
+    obs_stack_keys: Sequence[str] = "image_digit_left"
     obs_keys = ("siglip",)
     num_hidden_layers: int = 1
     proper_pad_mask: bool = True
 
     @nn.compact
-    def __call__(self,
+    def __call__(
+        self,
         observations,
         tasks=None,
-        train: bool = True, 
-        *unused_args, 
-        **unused_kwargs):
-
+        train: bool = True,
+        *unused_args,
+        **unused_kwargs,
+    ):
         def extract_inputs(keys, inputs, check_spatial=False):
             extracted_outputs = []
             for key in keys:
@@ -524,13 +569,13 @@ class SiglipTokenizer(LowdimObsTokenizer):
         ).Model(**{"num_classes": None, **(self.image or {})}, name="img")
         zimg, _ = image_model(enc_inputs)
         zimg = zimg.reshape((b, t, -1))
-        pass_observations = {self.obs_keys[0]: zimg} 
+        pass_observations = {self.obs_keys[0]: zimg}
         return super().__call__(pass_observations, *unused_args, **unused_kwargs)
 
 
 class IdentityObsTokenizer(nn.Module):
     """
-    Tokenizer that simply collects pre-computed tokens. 
+    Tokenizer that simply collects pre-computed tokens.
 
     Args:
         obs_keys (Sequence[str]): List of non-spatial keys to concatenate & tokenize. Supports regex.
@@ -544,14 +589,19 @@ class IdentityObsTokenizer(nn.Module):
 
     def __call__(self, observations, *unused_args, **unused_kwargs):
         assert self.obs_keys, "Need to specify observation keys to tokenize."
+
         def matching_observation_keys(obs_keys):
             if self.strict_match:
                 return [key for key in self.obs_keys if key in obs_keys]
             else:
                 obs_keys = []
                 for o_key in self.obs_keys:
-                    obs_keys.extend(list(filter(re.compile(o_key).match, sorted(observations.keys()))))
-                
+                    obs_keys.extend(
+                        list(
+                            filter(re.compile(o_key).match, sorted(observations.keys()))
+                        )
+                    )
+
         if len(matching_observation_keys(observations.keys())) == 0:
             logging.warning(
                 f"No observation inputs matching {self.obs_keys} were found."

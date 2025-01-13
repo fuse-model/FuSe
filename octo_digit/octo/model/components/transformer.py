@@ -4,7 +4,6 @@ from typing import Callable, Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-
 from octo.model.components.base import TokenGroup
 from octo.utils.typing import Dtype, PRNGKey, Shape, Union
 
@@ -193,7 +192,7 @@ class Transformer(nn.Module):
     dropout_rate: float = 0.1
     attention_dropout_rate: float = 0.1
     add_position_embedding: bool = False
-    repeat_pos_enc: bool = False 
+    repeat_pos_enc: bool = False
 
     @nn.compact
     def __call__(self, x, attention_mask, *, train):
@@ -224,6 +223,8 @@ class Transformer(nn.Module):
                 name=f"encoderblock_{lyr}",
                 num_heads=self.num_attention_heads,
             )(x, attention_mask, deterministic=not train)
+            x = self.perturb(f"layer_{lyr}_out", x)
+            self.sow("intermediates", f"layer_{lyr}_out", x)
         encoded = nn.LayerNorm(name="encoder_norm")(x)
 
         return encoded

@@ -81,4 +81,3 @@ python3 -m big_vision.trainers.proj.uvim.train --config big_vision/configs/proj/
 ## Acknowledgments
 The sampling code in `models/proj/uvim/decode.py` module is based on contributions
 from Anselm Levskaya, Ilya Tolstikhin and Maxim Neumann.
-

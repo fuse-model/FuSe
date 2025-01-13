@@ -40,13 +40,12 @@ import pandas as pd
 import PIL
 import tensorflow_datasets as tfds
 
-
 # Huggingface dataset path; this is missing about 10% of the images.
-_COUNTBENCH_PARQUET_PATH = '/tmp/data/train-00000-of-00001-cf54c241ba947306.parquet'
+_COUNTBENCH_PARQUET_PATH = "/tmp/data/train-00000-of-00001-cf54c241ba947306.parquet"
 # Public path to the original CountBench JSON file.
-_COUNTBENCH_JSON_PATH = '/tmp/data/CountBench.json'
+_COUNTBENCH_JSON_PATH = "/tmp/data/CountBench.json"
 # VQA annotations
-_QA_JSON_PATH = 'countbenchqa/data/countbench_paired_questions.json'
+_QA_JSON_PATH = "countbenchqa/data/countbench_paired_questions.json"
 
 _DESCRIPTION = """
 CountBench: We introduce a new object counting benchmark called CountBench,
@@ -75,90 +74,94 @@ _CITATION = """
 }
 """
 
-_HOMEPAGE = 'https://teaching-clip-to-count.github.io/'
+_HOMEPAGE = "https://teaching-clip-to-count.github.io/"
 
 
 class CountbenchQA(tfds.core.GeneratorBasedBuilder):
-  """Create CountbenchQA dataset."""
+    """Create CountbenchQA dataset."""
 
-  VERSION = tfds.core.Version('1.2.0')
-  RELEASE_NOTES = {'1.1.0': 'Add `huggingface` split.',
-                   '1.2.0': 'Fix image loading for `huggingface` split.'}
-  MANUAL_DOWNLOAD_INSTRUCTIONS = """
+    VERSION = tfds.core.Version("1.2.0")
+    RELEASE_NOTES = {
+        "1.1.0": "Add `huggingface` split.",
+        "1.2.0": "Fix image loading for `huggingface` split.",
+    }
+    MANUAL_DOWNLOAD_INSTRUCTIONS = """
   There are two parts which should be downloaded:
   * Countbench from Huggingface
   * Questions found in `data/countbench_paired_questions.json`
   """
 
-  def _info(self) -> tfds.core.DatasetInfo:
-    """Returns the dataset metadata."""
-    features = tfds.features.FeaturesDict({
-        'image': tfds.features.Image(shape=(None, None, 3)),
-        'image_id': tfds.features.Scalar(dtype=np.int32),
-        'question': tfds.features.Text(),
-        'text': tfds.features.Text(),
-        'image_url': tfds.features.Text(),
-        'number': tfds.features.Scalar(dtype=np.int32),
-    })
+    def _info(self) -> tfds.core.DatasetInfo:
+        """Returns the dataset metadata."""
+        features = tfds.features.FeaturesDict(
+            {
+                "image": tfds.features.Image(shape=(None, None, 3)),
+                "image_id": tfds.features.Scalar(dtype=np.int32),
+                "question": tfds.features.Text(),
+                "text": tfds.features.Text(),
+                "image_url": tfds.features.Text(),
+                "number": tfds.features.Scalar(dtype=np.int32),
+            }
+        )
 
-    return tfds.core.DatasetInfo(
-        builder=self,
-        features=features,
-        description=_DESCRIPTION,
-        supervised_keys=None,
-        homepage=_HOMEPAGE,
-        citation=_CITATION,
-    )
+        return tfds.core.DatasetInfo(
+            builder=self,
+            features=features,
+            description=_DESCRIPTION,
+            supervised_keys=None,
+            homepage=_HOMEPAGE,
+            citation=_CITATION,
+        )
 
-  def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-    """Call the function which defines the splits."""
-    del dl_manager
-    return {
-        'huggingface': self._generate_examples(split='huggingface'),
-    }
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Call the function which defines the splits."""
+        del dl_manager
+        return {
+            "huggingface": self._generate_examples(split="huggingface"),
+        }
 
-  def _generate_examples_hf(self):
-    """Generate examples from Huggingface parquet file.
+    def _generate_examples_hf(self):
+        """Generate examples from Huggingface parquet file.
 
-    Note that the parquet file provided on Huggingface is missing about 10%
-    of the images as can be verified by running
-    ```
-        import pyarrow.parquet as pq
-        with open(_COUNTBENCH_PARQUET_PATH, 'rb') as f:
-          x = pq.read_table(f)
-        sum([x['image'][i].is_valid for i in range(len(x['image']))])  # result: 491
-    ```
+        Note that the parquet file provided on Huggingface is missing about 10%
+        of the images as can be verified by running
+        ```
+            import pyarrow.parquet as pq
+            with open(_COUNTBENCH_PARQUET_PATH, 'rb') as f:
+              x = pq.read_table(f)
+            sum([x['image'][i].is_valid for i in range(len(x['image']))])  # result: 491
+        ```
 
-    Yields:
-      An index and a dictionary with features.
-    """
-    with open(_COUNTBENCH_PARQUET_PATH, 'rb') as f:
-      df = pd.read_parquet(f)
+        Yields:
+          An index and a dictionary with features.
+        """
+        with open(_COUNTBENCH_PARQUET_PATH, "rb") as f:
+            df = pd.read_parquet(f)
 
-    with open(_QA_JSON_PATH, 'r') as fq:
-      df_question = pd.read_json(fq)
+        with open(_QA_JSON_PATH, "r") as fq:
+            df_question = pd.read_json(fq)
 
-    df['question'] = df_question
+        df["question"] = df_question
 
-    for idx, row in df.iterrows():
-      # Some entries have no image.
-      if row['image'] is None:
-        continue
-      image = np.array(PIL.Image.open(io.BytesIO(row['image']['bytes'])))
-      if len(image.shape) != 3:
-        continue  # Filter out one bad image.
-      countbenchqa_dict = {
-          'image': image,
-          'image_id': idx,
-          'question': row['question'],
-          'text': row['text'],
-          'image_url': row['image_url'],
-          'number': row['number'],
-      }
-      yield idx, countbenchqa_dict
+        for idx, row in df.iterrows():
+            # Some entries have no image.
+            if row["image"] is None:
+                continue
+            image = np.array(PIL.Image.open(io.BytesIO(row["image"]["bytes"])))
+            if len(image.shape) != 3:
+                continue  # Filter out one bad image.
+            countbenchqa_dict = {
+                "image": image,
+                "image_id": idx,
+                "question": row["question"],
+                "text": row["text"],
+                "image_url": row["image_url"],
+                "number": row["number"],
+            }
+            yield idx, countbenchqa_dict
 
-  def _generate_examples(self, split: str):
-    if split == 'huggingface':
-      yield from self._generate_examples_hf()
-    else:
-      raise ValueError(f'Unknown split: {split}')
+    def _generate_examples(self, split: str):
+        if split == "huggingface":
+            yield from self._generate_examples_hf()
+        else:
+            raise ValueError(f"Unknown split: {split}")

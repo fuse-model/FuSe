@@ -1,3 +1,3 @@
 from setuptools import setup
 
-setup(name="octo_digit", packages=["octo", "eval"])
+setup(name="octo", packages=["octo", "examples", "experiments"])
