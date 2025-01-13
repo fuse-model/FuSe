@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://fuse-model.github.io/)
 
-[Joshua Jones](https://www.linkedin.com/in/joshua-w-jones/), [Oier Mees](https://www.oiermees.com/), [Carmelo Sferrazza](https://sferrazza.cc/), [Kyle Stachowicz](https://kylesta.ch/),[Pieter Abbeel](https://people.eecs.berkeley.edu/~pabbeel/), [Sergey Levine](https://people.eecs.berkeley.edu/~svlevine/)
+[Joshua Jones](https://www.linkedin.com/in/joshua-w-jones/), [Oier Mees](https://www.oiermees.com/), [Carmelo Sferrazza](https://sferrazza.cc/), [Kyle Stachowicz](https://kylesta.ch/), [Pieter Abbeel](https://people.eecs.berkeley.edu/~pabbeel/), [Sergey Levine](https://people.eecs.berkeley.edu/~svlevine/)
 <hr style="border: 2px solid gray;"></hr>
 
 This repo contains code to **Fu**se heterogeneous **Se**nsory (FuSE) data, like touch sensing or audio, into generalist robot policies via language grounding. We release both a dataset of 26,866 robot trajectories collected heterogeneous sensory modalities and checkpoints for our two main models: Octo a large diffusion-based transformer model and a 3B VLA based on PaliGemma.
