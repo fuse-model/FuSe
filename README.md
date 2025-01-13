@@ -51,6 +51,8 @@ python palivla_digit/palivla/train_fuse.py --config=palivla_digit/palivla/config
 ```
 
 # Inference with Pretrained Models
+Install `bridge_with_digit` on the robot controller, and start the action server.
+
 Download the pretrained models from the [HuggingFace model hub](https://huggingface.co/oier-mees/FuSe).
 
 For Octo:
